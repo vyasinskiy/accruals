@@ -12,17 +12,19 @@
     "notify": "tsx src/cli.ts notify",
     "run": "tsx src/cli.ts run",
     "scheduler": "tsx src/cli.ts scheduler",
-    "db:init": "tsx src/cli.ts db:init"
+    "db:init": "prisma db push",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate deploy"
   },
   "dependencies": {
-    "better-sqlite3": "^11.10.0",
+    "@prisma/client": "^6.6.0",
     "dotenv": "^16.6.1",
     "playwright": "^1.54.2",
     "zod": "^3.25.76"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^24.6.0",
+    "prisma": "^6.6.0",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3"
   }

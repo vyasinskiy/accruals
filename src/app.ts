@@ -12,7 +12,7 @@ export async function bootstrapSession(): Promise<void> {
 export async function runScan(notify = false): Promise<ScanSummary> {
   const startedAt = new Date().toISOString();
   const db = new AppDb();
-  const runId = db.insertRunStart(startedAt);
+  const runId = await db.insertRunStart(startedAt);
   const adapter = new KvartplataAdapter();
 
   try {
@@ -28,13 +28,20 @@ export async function runScan(notify = false): Promise<ScanSummary> {
         knownReceipts: 0,
         needsLogin: true
       };
-      db.finalizeRun(runId, summary);
+      await db.finalizeRun(runId, summary);
       if (notify) await sendTelegramMessage(buildNeedsLoginMessage(summary));
       return summary;
     }
 
     const scan = await adapter.scan();
-    const newReceipts = scan.receipts.filter((receipt) => db.upsertReceipt(receipt, runId));
+    const newReceipts: ScanSummary['newReceipts'] = [];
+
+    for (const receipt of scan.receipts) {
+      if (await db.upsertReceipt(receipt, runId)) {
+        newReceipts.push(receipt);
+      }
+    }
+
     const summary: ScanSummary = {
       startedAt,
       finishedAt: new Date().toISOString(),
@@ -51,7 +58,7 @@ export async function runScan(notify = false): Promise<ScanSummary> {
       needsLogin: scan.needsLogin
     };
 
-    db.finalizeRun(runId, summary);
+    await db.finalizeRun(runId, summary);
 
     if (notify) {
       if (summary.needsLogin) {
@@ -74,10 +81,10 @@ export async function runScan(notify = false): Promise<ScanSummary> {
       knownReceipts: 0,
       needsLogin: false
     };
-    db.finalizeRun(runId, summary);
+    await db.finalizeRun(runId, summary);
     throw error;
   } finally {
-    db.close();
+    await db.close();
   }
 }
 

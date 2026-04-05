@@ -1,0 +1,58 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Run {
+  id               Int                  @id @default(autoincrement())
+  startedAt        DateTime             @map("started_at")
+  finishedAt       DateTime?            @map("finished_at")
+  status           String
+  message          String
+  accountsScanned  Int                  @default(0) @map("accounts_scanned")
+  receiptsObserved Int                  @default(0) @map("receipts_observed")
+  newReceipts      Int                  @default(0) @map("new_receipts")
+  needsLogin       Boolean              @default(false) @map("needs_login")
+  summaryJson      String               @default("{}") @map("summary_json")
+  observations     ReceiptObservation[]
+
+  @@map("runs")
+}
+
+model Receipt {
+  id                Int                  @id @default(autoincrement())
+  accountExternalId String               @map("account_external_id")
+  monthLabel        String               @map("month_label")
+  amountText        String               @map("amount_text")
+  statusText        String?              @map("status_text")
+  receiptAvailable  Boolean              @default(false) @map("receipt_available")
+  receiptUrl        String?              @map("receipt_url")
+  receiptDownloaded Boolean              @default(false) @map("receipt_downloaded")
+  fingerprint       String               @unique
+  firstSeenAt       DateTime             @map("first_seen_at")
+  lastSeenAt        DateTime             @map("last_seen_at")
+  rawJson           String?              @map("raw_json")
+  observations      ReceiptObservation[]
+
+  @@index([accountExternalId, monthLabel], map: "idx_receipts_account_month")
+  @@map("receipts")
+}
+
+model ReceiptObservation {
+  id               Int      @id @default(autoincrement())
+  receiptId        Int      @map("receipt_id")
+  observedAt       DateTime @map("observed_at")
+  runId            Int?     @map("run_id")
+  rawJson          String?  @map("raw_json")
+  receiptFingerprint String @map("receipt_fingerprint")
+  receipt          Receipt  @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  run              Run?     @relation(fields: [runId], references: [id], onDelete: SetNull)
+
+  @@index([receiptFingerprint], map: "idx_receipt_observations_fingerprint")
+  @@index([receiptId], map: "idx_receipt_observations_receipt_id")
+  @@map("receipt_observations")
+}

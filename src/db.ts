@@ -1,188 +1,143 @@
-import Database from 'better-sqlite3';
-import { config } from './config';
+import { PrismaClient } from '@prisma/client';
 import type { ReceiptSnapshot, RunStatus, ScanSummary } from './types';
 
+const prismaClientSingleton = globalThis as typeof globalThis & { prisma?: PrismaClient };
+
+export const prisma = prismaClientSingleton.prisma ?? new PrismaClient();
+if (!prismaClientSingleton.prisma) {
+  prismaClientSingleton.prisma = prisma;
+}
+
 export class AppDb {
-  private readonly db: Database.Database;
+  async insertRunStart(startedAt: string): Promise<number> {
+    const run = await prisma.run.create({
+      data: {
+        startedAt: new Date(startedAt),
+        status: 'warning',
+        message: 'Run started',
+        summaryJson: '{}'
+      }
+    });
 
-  constructor() {
-    this.db = new Database(config.databasePath);
-    this.db.pragma('journal_mode = WAL');
-    this.migrate();
+    return run.id;
   }
 
-  migrate(): void {
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS runs (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        started_at TEXT NOT NULL,
-        finished_at TEXT,
-        status TEXT NOT NULL,
-        message TEXT NOT NULL,
-        accounts_scanned INTEGER NOT NULL DEFAULT 0,
-        receipts_observed INTEGER NOT NULL DEFAULT 0,
-        new_receipts INTEGER NOT NULL DEFAULT 0,
-        needs_login INTEGER NOT NULL DEFAULT 0,
-        summary_json TEXT NOT NULL
-      );
+  async upsertReceipt(receipt: ReceiptSnapshot, runId: number): Promise<boolean> {
+    const existing = await prisma.receipt.findUnique({
+      where: { fingerprint: receipt.fingerprint },
+      select: { id: true }
+    });
 
-      CREATE TABLE IF NOT EXISTS receipts (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        account_external_id TEXT NOT NULL,
-        month_label TEXT NOT NULL,
-        amount_text TEXT NOT NULL,
-        status_text TEXT,
-        receipt_available INTEGER NOT NULL DEFAULT 0,
-        receipt_url TEXT,
-        receipt_downloaded INTEGER NOT NULL DEFAULT 0,
-        fingerprint TEXT NOT NULL UNIQUE,
-        first_seen_at TEXT NOT NULL,
-        last_seen_at TEXT NOT NULL,
-        raw_json TEXT
-      );
+    const data = {
+      accountExternalId: receipt.accountExternalId,
+      monthLabel: receipt.monthLabel,
+      amountText: receipt.amountText,
+      statusText: receipt.statusText ?? null,
+      receiptAvailable: receipt.receiptAvailable,
+      receiptUrl: receipt.receiptUrl ?? null,
+      receiptDownloaded: receipt.receiptDownloaded,
+      lastSeenAt: new Date(receipt.observedAt),
+      rawJson: receipt.rawJson ?? null
+    };
 
-      CREATE TABLE IF NOT EXISTS receipt_observations (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        receipt_fingerprint TEXT NOT NULL,
-        observed_at TEXT NOT NULL,
-        run_id INTEGER,
-        raw_json TEXT,
-        FOREIGN KEY (run_id) REFERENCES runs(id)
-      );
+    const record = existing
+      ? await prisma.receipt.update({
+          where: { fingerprint: receipt.fingerprint },
+          data
+        })
+      : await prisma.receipt.create({
+          data: {
+            ...data,
+            fingerprint: receipt.fingerprint,
+            firstSeenAt: new Date(receipt.observedAt)
+          }
+        });
 
-      CREATE INDEX IF NOT EXISTS idx_receipts_account_month ON receipts(account_external_id, month_label);
-      CREATE INDEX IF NOT EXISTS idx_receipt_observations_fingerprint ON receipt_observations(receipt_fingerprint);
-    `);
+    await prisma.receiptObservation.create({
+      data: {
+        receiptId: record.id,
+        receiptFingerprint: receipt.fingerprint,
+        observedAt: new Date(receipt.observedAt),
+        runId,
+        rawJson: receipt.rawJson ?? null
+      }
+    });
+
+    return !existing;
   }
 
-  insertRunStart(startedAt: string): number {
-    const stmt = this.db.prepare(`
-      INSERT INTO runs (started_at, status, message, summary_json)
-      VALUES (?, 'warning', 'Run started', '{}')
-    `);
-    const result = stmt.run(startedAt);
-    return Number(result.lastInsertRowid);
+  async finalizeRun(runId: number, summary: ScanSummary): Promise<void> {
+    await prisma.run.update({
+      where: { id: runId },
+      data: {
+        finishedAt: new Date(summary.finishedAt),
+        status: summary.status,
+        message: summary.message,
+        accountsScanned: summary.accountsScanned,
+        receiptsObserved: summary.receiptsObserved,
+        newReceipts: summary.newReceipts.length,
+        needsLogin: summary.needsLogin,
+        summaryJson: JSON.stringify(summary)
+      }
+    });
   }
 
-  upsertReceipt(receipt: ReceiptSnapshot, runId: number): boolean {
-    const existing = this.db.prepare('SELECT fingerprint FROM receipts WHERE fingerprint = ?').get(receipt.fingerprint) as { fingerprint?: string } | undefined;
+  async getPendingNewReceiptsSinceLastRun(): Promise<ReceiptSnapshot[]> {
+    const lastRunWithNewReceipts = await prisma.run.findFirst({
+      where: { newReceipts: { gt: 0 }, finishedAt: { not: null } },
+      orderBy: { id: 'desc' },
+      select: { finishedAt: true }
+    });
 
-    if (existing?.fingerprint) {
-      this.db.prepare(`
-        UPDATE receipts
-        SET amount_text = ?,
-            status_text = ?,
-            receipt_available = ?,
-            receipt_url = ?,
-            receipt_downloaded = ?,
-            last_seen_at = ?,
-            raw_json = ?
-        WHERE fingerprint = ?
-      `).run(
-        receipt.amountText,
-        receipt.statusText ?? null,
-        receipt.receiptAvailable ? 1 : 0,
-        receipt.receiptUrl ?? null,
-        receipt.receiptDownloaded ? 1 : 0,
-        receipt.observedAt,
-        receipt.rawJson ?? null,
-        receipt.fingerprint
-      );
-    } else {
-      this.db.prepare(`
-        INSERT INTO receipts (
-          account_external_id, month_label, amount_text, status_text,
-          receipt_available, receipt_url, receipt_downloaded, fingerprint,
-          first_seen_at, last_seen_at, raw_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(
-        receipt.accountExternalId,
-        receipt.monthLabel,
-        receipt.amountText,
-        receipt.statusText ?? null,
-        receipt.receiptAvailable ? 1 : 0,
-        receipt.receiptUrl ?? null,
-        receipt.receiptDownloaded ? 1 : 0,
-        receipt.fingerprint,
-        receipt.observedAt,
-        receipt.observedAt,
-        receipt.rawJson ?? null
-      );
+    if (!lastRunWithNewReceipts?.finishedAt) {
+      return [];
     }
 
-    this.db.prepare(`
-      INSERT INTO receipt_observations (receipt_fingerprint, observed_at, run_id, raw_json)
-      VALUES (?, ?, ?, ?)
-    `).run(receipt.fingerprint, receipt.observedAt, runId, receipt.rawJson ?? null);
-
-    return !existing?.fingerprint;
-  }
-
-  finalizeRun(runId: number, summary: ScanSummary): void {
-    this.db.prepare(`
-      UPDATE runs
-      SET finished_at = ?,
-          status = ?,
-          message = ?,
-          accounts_scanned = ?,
-          receipts_observed = ?,
-          new_receipts = ?,
-          needs_login = ?,
-          summary_json = ?
-      WHERE id = ?
-    `).run(
-      summary.finishedAt,
-      summary.status,
-      summary.message,
-      summary.accountsScanned,
-      summary.receiptsObserved,
-      summary.newReceipts.length,
-      summary.needsLogin ? 1 : 0,
-      JSON.stringify(summary),
-      runId
-    );
-  }
-
-  getPendingNewReceiptsSinceLastRun(): ReceiptSnapshot[] {
-    const rows = this.db.prepare(`
-      SELECT r.*
-      FROM receipts r
-      JOIN runs run ON run.finished_at = r.first_seen_at
-      WHERE run.new_receipts > 0
-      ORDER BY r.first_seen_at DESC
-    `).all() as any[];
+    const rows = await prisma.receipt.findMany({
+      where: { firstSeenAt: lastRunWithNewReceipts.finishedAt },
+      orderBy: { firstSeenAt: 'desc' }
+    });
 
     return rows.map(mapReceiptRow);
   }
 
-  getLastRunStatus(): { status: RunStatus; message: string; needsLogin: boolean } | null {
-    const row = this.db.prepare(`
-      SELECT status, message, needs_login
-      FROM runs
-      ORDER BY id DESC
-      LIMIT 1
-    `).get() as { status: RunStatus; message: string; needs_login: number } | undefined;
+  async getLastRunStatus(): Promise<{ status: RunStatus; message: string; needsLogin: boolean } | null> {
+    const row = await prisma.run.findFirst({
+      orderBy: { id: 'desc' },
+      select: { status: true, message: true, needsLogin: true }
+    });
 
     if (!row) return null;
-    return { status: row.status, message: row.message, needsLogin: Boolean(row.needs_login) };
+    return { status: row.status as RunStatus, message: row.message, needsLogin: row.needsLogin };
   }
 
-  close(): void {
-    this.db.close();
+  async close(): Promise<void> {
+    await prisma.$disconnect();
   }
 }
 
-function mapReceiptRow(row: any): ReceiptSnapshot {
+function mapReceiptRow(row: {
+  accountExternalId: string;
+  monthLabel: string;
+  amountText: string;
+  statusText: string | null;
+  receiptAvailable: boolean;
+  receiptUrl: string | null;
+  receiptDownloaded: boolean;
+  fingerprint: string;
+  lastSeenAt: Date;
+  rawJson: string | null;
+}): ReceiptSnapshot {
   return {
-    accountExternalId: row.account_external_id,
-    monthLabel: row.month_label,
-    amountText: row.amount_text,
-    statusText: row.status_text ?? undefined,
-    receiptAvailable: Boolean(row.receipt_available),
-    receiptUrl: row.receipt_url ?? undefined,
-    receiptDownloaded: Boolean(row.receipt_downloaded),
+    accountExternalId: row.accountExternalId,
+    monthLabel: row.monthLabel,
+    amountText: row.amountText,
+    statusText: row.statusText ?? undefined,
+    receiptAvailable: row.receiptAvailable,
+    receiptUrl: row.receiptUrl ?? undefined,
+    receiptDownloaded: row.receiptDownloaded,
     fingerprint: row.fingerprint,
-    observedAt: row.last_seen_at,
-    rawJson: row.raw_json ?? undefined
+    observedAt: row.lastSeenAt.toISOString(),
+    rawJson: row.rawJson ?? undefined
   };
 }

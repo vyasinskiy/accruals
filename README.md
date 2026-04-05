@@ -6,7 +6,7 @@ What it does:
 - opens Playwright in **manual bootstrap mode** so a human can log in and solve captcha if needed
 - saves and reuses browser session state (`storageState`)
 - scans account/charges pages for receipt metadata
-- stores runs, observations, and deduplicated receipts in SQLite
+- stores runs, observations, and deduplicated receipts in **PostgreSQL via Prisma**
 - sends Telegram alerts when new receipts appear
 - sends Telegram alerts when the saved session is expired and manual re-login is needed
 
@@ -19,9 +19,11 @@ What it intentionally does **not** do:
 
 - `src/adapter.ts` - Playwright adapter for kvartplata.online
 - `src/app.ts` - bootstrap + scan orchestration
-- `src/db.ts` - SQLite schema and persistence
+- `src/db.ts` - Prisma-backed persistence
 - `src/telegram.ts` - Telegram notifications
 - `src/cli.ts` - CLI commands
+- `prisma/schema.prisma` - Prisma models
+- `docker-compose.yml` - local PostgreSQL for development
 - `.env.example` - configuration template
 
 ## Install
@@ -33,6 +35,33 @@ npm install
 npx playwright install chromium
 ```
 
+## Start PostgreSQL locally
+
+```bash
+docker compose up -d postgres
+```
+
+Default local database credentials in `docker-compose.yml` and `.env.example`:
+- database: `kvartplata_watcher`
+- user: `postgres`
+- password: `postgres`
+- port: `5432`
+
+## Initialize Prisma / database schema
+
+```bash
+npm run prisma:generate
+npm run db:init
+```
+
+If you prefer checked-in SQL migrations instead of schema push:
+
+```bash
+npm run prisma:migrate
+```
+
+`db:init` uses `prisma db push`, which is the fastest local bootstrap path. `prisma:migrate` applies the checked-in migration files.
+
 ## Configure
 
 At minimum set these in `.env`:
@@ -40,6 +69,7 @@ At minimum set these in `.env`:
 ```env
 APP_URL=https://kvartplata.online/
 LOGIN_URL=https://kvartplata.online/
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/kvartplata_watcher?schema=public
 TELEGRAM_BOT_TOKEN=...
 TELEGRAM_CHAT_ID=...
 ```
@@ -82,7 +112,7 @@ This:
 - goes to the account page
 - attempts to open the charges/receipts tab
 - extracts current rows like month, amount, status, and receipt button presence
-- stores every observation in SQLite
+- stores every observation in PostgreSQL
 - inserts new receipts only once based on a fingerprint derived from account + month + amount + status + receipt URL
 
 ## Scan and notify
@@ -125,12 +155,12 @@ SCHEDULE_MINUTE=0
 APP_TIMEZONE=America/Los_Angeles
 ```
 
-## SQLite data model
+## Prisma / PostgreSQL data model
 
-Tables:
+Tables/models:
 - `runs` - each scan attempt and its final status
 - `receipts` - deduplicated receipt metadata, first seen / last seen
-- `receipt_observations` - every observation event linked to a run
+- `receipt_observations` - every observation event linked to a run and receipt
 
 Receipt metadata is stored even if PDF download is unavailable. Fields include:
 - account id
@@ -144,6 +174,8 @@ Receipt metadata is stored even if PDF download is unavailable. Fields include:
 ## Typical commands
 
 ```bash
+docker compose up -d postgres
+npm run prisma:generate
 npm run db:init
 npm run bootstrap
 npm run scan
@@ -159,7 +191,8 @@ npm run typecheck
 - PDF download is best-effort only.
 - If the site requires extra clicks or month selection widgets, extend `src/adapter.ts` for your exact account flow.
 - I could not safely automate a real authenticated walkthrough here, so the default adapter is intentionally conservative and configurable.
+- No automated SQLite-to-Postgres data migration is included. This change switches persistence going forward.
 
 ## Next practical step
 
-Run bootstrap once, then inspect the first `npm run scan` output and tweak selectors in `.env` or `src/adapter.ts` against the real DOM. That is the narrowest remaining risk.
+Start Postgres, run Prisma init, run bootstrap once, then inspect the first `npm run scan` output and tweak selectors in `.env` or `src/adapter.ts` against the real DOM. That is the narrowest remaining risk.

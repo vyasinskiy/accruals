@@ -26,8 +26,8 @@ async function main(): Promise<void> {
       break;
     case 'db:init': {
       const db = new AppDb();
-      db.close();
-      console.log('Database initialized.');
+      await db.close();
+      console.log('Database initialized. Run `npm run prisma:generate` and `npm run db:init` after Postgres is up.');
       break;
     }
     default:
@@ -60,11 +60,13 @@ async function runScheduler(): Promise<void> {
 
 function printHelp(): void {
   console.log(`Usage:
-  npm run bootstrap   # open browser, log in manually, save storage state
-  npm run scan        # reuse saved session, scan accounts, persist results
-  npm run run         # scan + send Telegram notifications for new receipts / login required
-  npm run scheduler   # local in-process scheduler (checks every minute)
-  npm run db:init     # initialize SQLite schema`);
+  npm run bootstrap         # open browser, log in manually, save storage state
+  npm run scan              # reuse saved session, scan accounts, persist results
+  npm run run               # scan + send Telegram notifications for new receipts / login required
+  npm run scheduler         # local in-process scheduler (checks every minute)
+  npm run prisma:generate   # generate Prisma client
+  npm run db:init           # push Prisma schema to PostgreSQL
+  npm run prisma:migrate    # apply checked-in Prisma migrations`);
 }
 
 function pad(value: number): string {

@@ -11,7 +11,7 @@ const schema = z.object({
   APP_TIMEZONE: z.string().default('America/Los_Angeles'),
   DATA_DIR: z.string().default('./data'),
   STORAGE_STATE_PATH: z.string().default('./data/storage-state.json'),
-  DATABASE_PATH: z.string().default('./data/kvartplata.db'),
+  DATABASE_URL: z.string().min(1).default('postgresql://postgres:postgres@localhost:5432/kvartplata_watcher?schema=public'),
   HEADLESS: z.coerce.boolean().default(true),
   LOG_LEVEL: z.string().default('info'),
   LOGIN_URL: z.string().url().default('https://kvartplata.online/'),
@@ -52,14 +52,13 @@ export const config = {
   rootDir,
   dataDir: resolvePath(raw.DATA_DIR),
   storageStatePath: resolvePath(raw.STORAGE_STATE_PATH),
-  databasePath: resolvePath(raw.DATABASE_PATH),
   receiptDownloadDir: resolvePath(raw.RECEIPT_DOWNLOAD_DIR),
   loginRequiredTextList: splitCsv(raw.LOGIN_REQUIRED_TEXT),
   accountReadyTextList: splitCsv(raw.ACCOUNT_READY_TEXT),
   sessionRequiredKeywords: splitCsv(raw.SESSION_REQUIRED_KEYWORDS).map((x) => x.toLowerCase())
 };
 
-for (const dir of [config.dataDir, path.dirname(config.storageStatePath), path.dirname(config.databasePath), config.receiptDownloadDir]) {
+for (const dir of [config.dataDir, path.dirname(config.storageStatePath), config.receiptDownloadDir]) {
   fs.mkdirSync(dir, { recursive: true });
 }
 
