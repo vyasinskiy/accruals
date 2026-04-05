@@ -5,13 +5,20 @@ import { z } from 'zod';
 
 dotenv.config();
 
+const defaultWebUrl = 'https://xn--new--o5df.xn--80aaaf3bi1ahsd.xn--80asehdb/';
+const defaultApiBaseUrl = 'https://xn--new--o5df.xn--80aaaf3bi1ahsd.xn--80asehdb';
+
 const schema = z.object({
   NODE_ENV: z.string().default('development'),
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
-  APP_URL: z.string().url().default('https://kvartplata.online/'),
-  LOGIN_URL: z.string().url().default('https://kvartplata.online/'),
-  ACCOUNT_PAGE_URL: z.string().optional().default('https://kvartplata.online/new-web/apartments'),
-  API_BASE_URL: z.string().url().default('https://kvartplata.online'),
+  APP_URL: z.string().url().default(defaultWebUrl),
+  LOGIN_URL: z.string().url().default(defaultWebUrl),
+  ACCOUNT_PAGE_URL: z.string().optional().default(`${defaultWebUrl}new-web/apartments`),
+  API_BASE_URL: z.string().url().default(defaultApiBaseUrl),
+  API_APARTMENTS_PATH: z.string().default(`${defaultApiBaseUrl}/new-web/apartments`),
+  API_APARTMENT_INFO_PATH: z.string().default('/new-web/apartments/{apartmentId}/info'),
+  API_ACCRUALS_PATH: z.string().default('/new-web/accruals'),
+  API_INVOICE_PATH: z.string().default('/new-web/Accruals/invoice'),
   DATA_DIR: z.string().default('./data'),
   STORAGE_STATE_PATH: z.string().default('./data/storage-state.json'),
   DATABASE_URL: z.string().min(1).default('postgresql://postgres:postgres@localhost:5432/kvartplata_watcher?schema=public'),
@@ -42,10 +49,10 @@ export const config = {
   sessionRequiredKeywords: splitCsv(raw.SESSION_REQUIRED_KEYWORDS).map((x) => x.toLowerCase()),
   accountReadyTextList: splitCsv(raw.ACCOUNT_READY_TEXT),
   endpoints: {
-    apartments: '/new-web/apartments',
-    accruals: '/new-web/accruals',
-    utilities: '/new-web/utilities',
-    invoice: '/new-web/Accruals/invoice'
+    apartments: raw.API_APARTMENTS_PATH,
+    apartmentInfo: raw.API_APARTMENT_INFO_PATH,
+    accruals: raw.API_ACCRUALS_PATH,
+    invoice: raw.API_INVOICE_PATH
   }
 };
 

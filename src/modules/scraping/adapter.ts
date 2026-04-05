@@ -28,7 +28,9 @@ export class KvartplataAdapter {
     await browser.close();
   }
 
-  async scan(filters: { apartmentExternalIds?: string[] } = {}): Promise<ScanResult> {
+  async scan(
+    filters: { apartmentExternalIds?: string[]; log?: (message: string) => void } = {}
+  ): Promise<ScanResult> {
     const { chromium } = await import('playwright');
     const browser = await chromium.launch({ headless: config.HEADLESS });
     const context = await browser.newContext({
@@ -36,6 +38,7 @@ export class KvartplataAdapter {
       acceptDownloads: config.DOWNLOAD_RECEIPTS
     });
     const page = await context.newPage();
+    const log = filters.log ?? (() => undefined);
 
     try {
       await page.goto(config.ACCOUNT_PAGE_URL, { waitUntil: 'domcontentloaded' });
@@ -47,34 +50,84 @@ export class KvartplataAdapter {
           accruals: [],
           invoices: [],
           needsLogin: true,
+          degraded: false,
           message: 'Saved session is missing or expired; manual bootstrap is required.'
         };
       }
 
-      const apartmentPayload = await this.fetchJson(page, config.endpoints.apartments);
-      const apartments = extractApartments(apartmentPayload);
-      const selectedApartments = filters.apartmentExternalIds?.length
+      const warnings: string[] = [];
+      const apartmentPayload = await this.fetchJson(page, config.endpoints.apartments).catch((error) => {
+        warnings.push(error instanceof Error ? error.message : String(error));
+        return null;
+      });
+      const apartments = apartmentPayload ? extractApartments(apartmentPayload) : [];
+      if (!apartmentPayload) {
+        return {
+          apartments: [],
+          accruals: [],
+          invoices: [],
+          needsLogin: false,
+          degraded: true,
+          message: warnings.join(' ')
+        };
+      }
+      log(`Apartments discovered from /new-web/apartments: ${apartments.length}`);
+
+      const selectedApartmentRefs = filters.apartmentExternalIds?.length
         ? apartments.filter((item) => filters.apartmentExternalIds?.includes(item.externalId))
         : apartments;
+      log(`Apartments selected for scan: ${selectedApartmentRefs.length}`);
 
+      const apartmentSnapshots: ApartmentSnapshot[] = [];
       const accruals: AccrualSnapshot[] = [];
       const invoices: InvoiceSnapshot[] = [];
+      let accountsFound = 0;
+      let invoicesDownloaded = 0;
+      let invoicesSkipped = 0;
 
-      for (const apartment of selectedApartments) {
-        const accrualPayload = await this.fetchJson(page, config.endpoints.accruals, { apartmentId: apartment.externalId });
-        const utilityPayload = await this.fetchJson(page, config.endpoints.utilities, { apartmentId: apartment.externalId }).catch(() => null);
-        const apartmentAccruals = extractAccruals(apartment.externalId, accrualPayload);
-        const apartmentInvoices = await this.extractInvoices(page, apartment.externalId, apartmentAccruals, utilityPayload);
-        accruals.push(...apartmentAccruals);
-        invoices.push(...apartmentInvoices);
+      for (const apartment of selectedApartmentRefs) {
+        try {
+          log(`Apartment found: ${formatApartment(apartment)}`);
+          const infoPayload = await this.fetchJson(page, config.endpoints.apartmentInfo, {}, { apartmentId: apartment.externalId });
+          const accounts = extractAccounts(apartment, infoPayload);
+          accountsFound += accounts.length;
+          log(`Accounts found for apartment ${apartment.externalId}: ${accounts.length}`);
+
+          for (const account of accounts) {
+            apartmentSnapshots.push(account);
+            log(`Scanning account ${account.externalId} for apartment ${apartment.externalId}`);
+
+            const accrualPayload = await this.fetchJson(page, config.endpoints.accruals, { accountId: account.externalId });
+            const accountAccruals = extractAccruals(account, accrualPayload);
+            accruals.push(...accountAccruals);
+            log(`Accrual periods found for account ${account.externalId}: ${accountAccruals.length}`);
+
+            const accountInvoices = await this.extractInvoices(page, account, accountAccruals, log);
+            invoices.push(...accountInvoices.rows);
+            invoicesDownloaded += accountInvoices.downloaded;
+            invoicesSkipped += accountInvoices.skipped;
+          }
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          warnings.push(`Apartment ${apartment.externalId}: ${errorMessage}`);
+          log(`Apartment ${apartment.externalId} failed: ${errorMessage}`);
+        }
       }
 
+      const selectedAccounts = dedupe(apartmentSnapshots, (item) => item.externalId);
+      log(
+        `Scan summary: apartments=${selectedApartmentRefs.length}, accounts=${selectedAccounts.length}, accruals=${accruals.length}, invoices=${invoices.length}, downloaded=${invoicesDownloaded}, skipped=${invoicesSkipped}`
+      );
+
       return {
-        apartments: selectedApartments,
+        apartments: selectedAccounts,
         accruals,
         invoices,
         needsLogin: false,
-        message: `Scanned ${selectedApartments.length} apartment(s), ${accruals.length} accrual row(s), ${invoices.length} invoice row(s).`
+        degraded: warnings.length > 0,
+        message: warnings.length
+          ? `Scanned ${selectedApartmentRefs.length} apartment(s), ${accountsFound} account(s), ${accruals.length} accrual row(s), ${invoices.length} invoice row(s). Warnings: ${warnings.join(' ')}`
+          : `Scanned ${selectedApartmentRefs.length} apartment(s), ${accountsFound} account(s), ${accruals.length} accrual row(s), ${invoices.length} invoice row(s).`
       };
     } finally {
       await browser.close();
@@ -83,41 +136,60 @@ export class KvartplataAdapter {
 
   private async extractInvoices(
     page: Page,
-    apartmentExternalId: string,
+    account: ApartmentSnapshot,
     accruals: AccrualSnapshot[],
-    utilityPayload: unknown
-  ): Promise<InvoiceSnapshot[]> {
-    const utilityMap = buildUtilityMap(utilityPayload);
+    log: (message: string) => void
+  ): Promise<{ rows: InvoiceSnapshot[]; downloaded: number; skipped: number }> {
     const results: InvoiceSnapshot[] = [];
+    let downloaded = 0;
+    let skipped = 0;
 
     for (const accrual of accruals) {
-      const invoicePayload = await this.fetchJson(page, config.endpoints.invoice, {
-        apartmentId: apartmentExternalId,
-        period: accrual.periodLabel
-      }).catch(() => null);
+      const invoiceAttempt = await this.tryFetchInvoice(
+        page.context(),
+        account.externalId,
+        accrual.periodId ?? accrual.periodLabel
+      );
 
-      const invoiceUrl = findFirstUrl(invoicePayload) ?? utilityMap.get(accrual.periodLabel);
-      const downloaded = config.DOWNLOAD_RECEIPTS && invoiceUrl
-        ? await this.tryDownloadInvoice(page.context(), invoiceUrl, apartmentExternalId, accrual.periodLabel)
-        : false;
+      if (invoiceAttempt.downloaded) downloaded += 1;
+      else skipped += 1;
+
+      log(
+        invoiceAttempt.available
+          ? `Invoice ${invoiceAttempt.downloaded ? 'downloaded' : 'available but skipped'} for account ${account.externalId}, period ${accrual.periodLabel}`
+          : `Invoice missing for account ${account.externalId}, period ${accrual.periodLabel}`
+      );
 
       results.push({
-        apartmentExternalId,
+        apartmentExternalId: account.externalId,
+        parentApartmentId: account.parentApartmentId,
         periodLabel: accrual.periodLabel,
-        invoiceUrl: invoiceUrl ?? undefined,
-        utilitiesUrl: utilityMap.get(accrual.periodLabel) ?? undefined,
-        available: Boolean(invoiceUrl || utilityMap.get(accrual.periodLabel)),
-        downloaded,
-        fingerprint: buildFingerprint('invoice', apartmentExternalId, accrual.periodLabel, invoiceUrl ?? '', utilityMap.get(accrual.periodLabel) ?? ''),
-        rawJson: JSON.stringify({ invoicePayload, utilityPayload })
+        periodId: accrual.periodId,
+        invoiceUrl: invoiceAttempt.invoiceUrl,
+        utilitiesUrl: undefined,
+        available: invoiceAttempt.available,
+        downloaded: invoiceAttempt.downloaded,
+        fingerprint: buildFingerprint('invoice', account.externalId, accrual.periodId ?? accrual.periodLabel, invoiceAttempt.invoiceUrl ?? '', invoiceAttempt.localFilePath ?? ''),
+        rawJson: JSON.stringify({
+          accountId: account.externalId,
+          parentApartmentId: account.parentApartmentId,
+          periodId: accrual.periodId ?? accrual.periodLabel,
+          invoiceUrl: invoiceAttempt.invoiceUrl,
+          localFilePath: invoiceAttempt.localFilePath
+        })
       });
     }
 
-    return dedupe(results, (item) => item.fingerprint);
+    return { rows: dedupe(results, (item) => item.fingerprint), downloaded, skipped };
   }
 
-  private async fetchJson(page: Page, endpoint: string, params: Record<string, string> = {}): Promise<unknown> {
-    const url = new URL(endpoint, config.API_BASE_URL);
+  private async fetchJson(
+    page: Page,
+    endpoint: string,
+    params: Record<string, string> = {},
+    pathParams: Record<string, string> = {}
+  ): Promise<unknown> {
+    const url = new URL(applyPathParams(endpoint, pathParams), config.API_BASE_URL);
     for (const [key, value] of Object.entries(params)) {
       url.searchParams.set(key, value);
     }
@@ -145,19 +217,38 @@ export class KvartplataAdapter {
     return config.sessionRequiredKeywords.some((keyword) => bodyText.includes(keyword));
   }
 
-  private async tryDownloadInvoice(context: BrowserContext, invoiceUrl: string, apartmentId: string, periodLabel: string): Promise<boolean> {
+  private async tryFetchInvoice(
+    context: BrowserContext,
+    accountId: string,
+    periodId: string
+  ): Promise<{ available: boolean; downloaded: boolean; invoiceUrl: string; localFilePath?: string }> {
+    const invoiceUrl = new URL(config.endpoints.invoice, config.API_BASE_URL);
+    invoiceUrl.searchParams.set('AccountId', accountId);
+    invoiceUrl.searchParams.set('PeriodId', periodId);
+
     try {
       const page = await context.newPage();
-      const response = await page.goto(invoiceUrl, { waitUntil: 'domcontentloaded' });
-      if (!response?.ok()) return false;
+      const response = await page.request.get(invoiceUrl.toString(), {
+        headers: { accept: 'application/pdf, application/octet-stream, */*' }
+      });
+      if (!response.ok()) {
+        await page.close();
+        return { available: false, downloaded: false, invoiceUrl: invoiceUrl.toString() };
+      }
       const buffer = await response.body();
-      const safeName = `${slug(apartmentId)}-${slug(periodLabel)}.pdf`;
-      await fs.mkdir(config.receiptDownloadDir, { recursive: true });
-      await fs.writeFile(path.join(config.receiptDownloadDir, safeName), buffer);
       await page.close();
-      return true;
+
+      if (!config.DOWNLOAD_RECEIPTS) {
+        return { available: true, downloaded: false, invoiceUrl: invoiceUrl.toString() };
+      }
+
+      const safeName = `${slug(accountId)}-${slug(periodId)}.pdf`;
+      const localFilePath = path.join(config.receiptDownloadDir, safeName);
+      await fs.mkdir(config.receiptDownloadDir, { recursive: true });
+      await fs.writeFile(localFilePath, buffer);
+      return { available: true, downloaded: true, invoiceUrl: invoiceUrl.toString(), localFilePath };
     } catch {
-      return false;
+      return { available: false, downloaded: false, invoiceUrl: invoiceUrl.toString() };
     }
   }
 }
@@ -172,42 +263,56 @@ async function waitForEnter(): Promise<void> {
 function extractApartments(payload: unknown): ApartmentSnapshot[] {
   const rows = collectObjects(payload);
   return dedupe(rows.map((row) => ({
-    externalId: pickString(row, ['id', 'Id', 'accountId', 'account_id', 'ls', 'personalAccount']) ?? crypto.createHash('md5').update(JSON.stringify(row)).digest('hex'),
+    externalId: pickString(row, ['id', 'Id', 'apartmentId', 'apartment_id']) ?? crypto.createHash('md5').update(JSON.stringify(row)).digest('hex'),
     address: pickString(row, ['address', 'Address', 'fullAddress', 'houseAddress']),
     organization: pickString(row, ['organization', 'Organization', 'company', 'managementCompany']),
-    accountNumber: pickString(row, ['accountNumber', 'AccountNumber', 'ls', 'personalAccount']),
     rawJson: JSON.stringify(row)
   })), (item) => item.externalId);
 }
 
-function extractAccruals(apartmentExternalId: string, payload: unknown): AccrualSnapshot[] {
+function extractAccounts(apartment: ApartmentSnapshot, payload: unknown): ApartmentSnapshot[] {
+  const accounts = findObjectsAtKeys(payload, ['accounts', 'Accounts']);
+  const rows = accounts.length ? accounts : collectObjects(payload);
+  const extracted: ApartmentSnapshot[] = [];
+
+  for (const row of rows) {
+    const accountId = pickString(row, ['id', 'Id', 'accountId', 'account_id', 'ls', 'personalAccount']);
+    if (!accountId) continue;
+    extracted.push({
+      externalId: accountId,
+      parentApartmentId: apartment.externalId,
+      address: apartment.address ?? pickString(row, ['address', 'Address', 'fullAddress', 'houseAddress']),
+      organization: apartment.organization ?? pickString(row, ['organization', 'Organization', 'company', 'managementCompany']),
+      accountNumber: pickString(row, ['number', 'Number', 'accountNumber', 'AccountNumber', 'ls', 'personalAccount']) ?? accountId,
+      accountLabel: pickString(row, ['name', 'Name', 'caption', 'Caption', 'title', 'Title']),
+      rawJson: JSON.stringify({ apartment, account: row })
+    });
+  }
+
+  return dedupe(extracted, (item) => item.externalId);
+}
+
+function extractAccruals(account: ApartmentSnapshot, payload: unknown): AccrualSnapshot[] {
   return dedupe(collectObjects(payload)
     .map((row) => {
-      const periodLabel = pickString(row, ['period', 'Period', 'month', 'Month', 'name']) ?? 'unknown';
-      const amountText = pickString(row, ['amount', 'Amount', 'sum', 'Sum', 'value']);
+      const periodId = pickString(row, ['periodId', 'PeriodId', 'period', 'Period', 'month', 'Month']);
+      const periodLabel = periodId ?? pickString(row, ['name', 'Name', 'caption', 'Caption']) ?? 'unknown';
+      const amountText = pickString(row, ['amount', 'Amount', 'sum', 'Sum', 'value', 'accruedAmount', 'AccruedAmount']);
       const statusText = pickString(row, ['status', 'Status', 'state']);
-      const sourceUrl = findFirstUrl(row) ?? undefined;
+      const sourceUrl = undefined;
       return {
-        apartmentExternalId,
+        apartmentExternalId: account.externalId,
+        parentApartmentId: account.parentApartmentId,
         periodLabel,
+        periodId,
         amountText,
         statusText,
         sourceUrl,
-        fingerprint: buildFingerprint('accrual', apartmentExternalId, periodLabel, amountText ?? '', statusText ?? '', sourceUrl ?? ''),
-        rawJson: JSON.stringify(row)
+        fingerprint: buildFingerprint('accrual', account.externalId, periodId ?? periodLabel, amountText ?? '', statusText ?? ''),
+        rawJson: JSON.stringify({ account, accrual: row })
       };
     })
     .filter((item) => item.periodLabel !== 'unknown' || item.amountText || item.statusText), (item) => item.fingerprint);
-}
-
-function buildUtilityMap(payload: unknown): Map<string, string> {
-  const map = new Map<string, string>();
-  for (const row of collectObjects(payload)) {
-    const periodLabel = pickString(row, ['period', 'Period', 'month', 'Month', 'name']);
-    const url = findFirstUrl(row);
-    if (periodLabel && url) map.set(periodLabel, url);
-  }
-  return map;
 }
 
 function collectObjects(payload: unknown): Record<string, unknown>[] {
@@ -240,30 +345,39 @@ function pickString(source: Record<string, unknown>, keys: string[]): string | u
   return undefined;
 }
 
-function findFirstUrl(payload: unknown): string | undefined {
-  if (typeof payload === 'string') {
-    return /^https?:\/\//.test(payload) ? payload : undefined;
-  }
+function findObjectsAtKeys(payload: unknown, keys: string[]): Record<string, unknown>[] {
+  const results: Record<string, unknown>[] = [];
+  visit(payload);
+  return results;
 
-  if (Array.isArray(payload)) {
-    for (const item of payload) {
-      const url = findFirstUrl(item);
-      if (url) return url;
+  function visit(value: unknown): void {
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item);
+      return;
     }
-    return undefined;
-  }
 
-  if (payload && typeof payload === 'object') {
-    for (const [key, value] of Object.entries(payload)) {
-      if (typeof value === 'string' && key.toLowerCase().includes('url') && /^https?:\/\//.test(value)) {
-        return value;
+    if (!value || typeof value !== 'object') return;
+
+    const record = value as Record<string, unknown>;
+    for (const key of keys) {
+      const nested = record[key];
+      if (Array.isArray(nested)) {
+        for (const item of nested) {
+          if (item && typeof item === 'object') results.push(item as Record<string, unknown>);
+        }
       }
-      const nested = findFirstUrl(value);
-      if (nested) return nested;
     }
-  }
 
-  return undefined;
+    for (const nested of Object.values(record)) visit(nested);
+  }
+}
+
+function applyPathParams(endpoint: string, params: Record<string, string>): string {
+  let value = endpoint;
+  for (const [key, paramValue] of Object.entries(params)) {
+    value = value.replaceAll(`{${key}}`, encodeURIComponent(paramValue));
+  }
+  return value;
 }
 
 function buildFingerprint(...parts: string[]): string {
@@ -278,4 +392,8 @@ function dedupe<T>(items: T[], getKey: (item: T) => string): T[] {
 
 function slug(value: string): string {
   return value.toLowerCase().replace(/[^a-zа-яё0-9]+/gi, '-').replace(/^-+|-+$/g, '');
+}
+
+function formatApartment(apartment: ApartmentSnapshot): string {
+  return [apartment.externalId, apartment.address, apartment.organization].filter(Boolean).join(' | ');
 }

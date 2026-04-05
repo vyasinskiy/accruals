@@ -31,6 +31,7 @@ export class ScrapingService {
   async scan(input: ManualScanDto = {}): Promise<ScanSummary> {
     const startedAt = new Date();
     const trigger = input.trigger ?? 'manual';
+    const log = (message: string) => console.log(`[scan:${trigger}] ${message}`);
     const run = await this.prisma.run.create({
       data: {
         startedAt,
@@ -42,36 +43,53 @@ export class ScrapingService {
     });
 
     try {
+      log('Run started');
       const dbApartments = await this.apartmentsService.findMany({
         externalId: input.apartmentExternalId,
         address: input.address,
         organization: input.organization
       });
+      const hasExplicitApartmentFilter = Boolean(input.apartmentExternalId || input.address || input.organization);
+      if (hasExplicitApartmentFilter) {
+        log(`DB filter matched apartments/accounts: ${dbApartments.length}`);
+      }
 
       let apartments: ApartmentSnapshot[] = [];
       let accruals: AccrualSnapshot[] = [];
       let invoices: InvoiceSnapshot[] = [];
       let needsLogin = false;
+      let degraded = false;
       let message = 'No data discovered.';
 
       if (!fs.existsSync(config.storageStatePath)) {
         needsLogin = true;
         message = 'No saved Playwright storage state found. Run npm run bootstrap first.';
+        log(message);
       } else {
         try {
-          const scan = await this.adapter.scan({ apartmentExternalIds: dbApartments.length ? dbApartments.map((item) => item.externalId) : undefined });
+          const scan = await this.adapter.scan({
+            apartmentExternalIds: hasExplicitApartmentFilter && dbApartments.length
+              ? dbApartments.map((item) => item.externalId)
+              : undefined,
+            log
+          });
           apartments = scan.apartments;
           accruals = scan.accruals;
           invoices = scan.invoices;
           needsLogin = scan.needsLogin;
+          degraded = scan.degraded;
           message = scan.message;
+          log(message);
         } catch (error) {
+          degraded = true;
           message = error instanceof Error ? error.message : String(error);
+          log(`Live scan failed: ${message}`);
         }
       }
 
       const fallback = loadConfirmedReceiptsSummary();
       if (fallback.length) {
+        log(`Fallback receipts imported from local summary: ${fallback.length}`);
         const fallbackApartment = toFallbackApartment(fallback[0]);
         if (!apartments.some((item) => item.externalId === fallbackApartment.externalId)) {
           apartments.push(fallbackApartment);
@@ -108,22 +126,25 @@ export class ScrapingService {
         apartmentMap.set(apartment.externalId, result.id);
         if (result.created) newApartments += 1;
       }
+      log(`Apartments/accounts upserted: total=${apartments.length}, new=${newApartments}`);
 
       let newAccruals = 0;
       for (const accrual of accruals) {
         if (await this.upsertAccrual(accrual, apartmentMap)) newAccruals += 1;
       }
+      log(`Accruals upserted: total=${accruals.length}, new=${newAccruals}`);
 
       let newInvoices = 0;
       for (const invoice of invoices) {
         if (await this.upsertInvoice(invoice, apartmentMap)) newInvoices += 1;
       }
+      log(`Invoices upserted: total=${invoices.length}, new=${newInvoices}`);
 
-      return await this.finalize(run.id, {
+      const summary = await this.finalize(run.id, {
         startedAt: startedAt.toISOString(),
         finishedAt: new Date().toISOString(),
         trigger,
-        status: needsLogin ? 'warning' : 'success',
+        status: needsLogin || degraded ? 'warning' : 'success',
         message: fallback.length
           ? `${message} Confirmed local receipts were imported for account ${fallback[0].accountId}.`
           : message,
@@ -135,13 +156,18 @@ export class ScrapingService {
         newInvoices,
         needsLogin
       });
+
+      log(`Run finished with status=${summary.status}`);
+      return summary;
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      log(`Run failed: ${message}`);
       return await this.finalize(run.id, {
         startedAt: startedAt.toISOString(),
         finishedAt: new Date().toISOString(),
         trigger,
         status: 'error',
-        message: error instanceof Error ? error.message : String(error),
+        message,
         apartmentsScanned: 0,
         accrualsObserved: 0,
         invoicesObserved: 0,

@@ -8,7 +8,7 @@ export class ManualScanDto {
   @IsIn(['manual', 'cron'])
   trigger?: 'manual' | 'cron';
 
-  @ApiPropertyOptional({ type: String, description: 'Optional apartment external id filter. If omitted, scans apartments already known in DB or all source apartments on first run.' })
+  @ApiPropertyOptional({ type: String, description: 'Optional apartment external id filter. If omitted, scans all apartments returned by the source.' })
   @IsOptional()
   @IsString()
   apartmentExternalId?: string;

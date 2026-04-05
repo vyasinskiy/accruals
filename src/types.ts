@@ -2,15 +2,19 @@ export type RunStatus = 'success' | 'warning' | 'needs_login' | 'error';
 
 export interface ApartmentSnapshot {
   externalId: string;
+  parentApartmentId?: string;
   address?: string;
   organization?: string;
   accountNumber?: string;
+  accountLabel?: string;
   rawJson?: string;
 }
 
 export interface AccrualSnapshot {
   apartmentExternalId: string;
+  parentApartmentId?: string;
   periodLabel: string;
+  periodId?: string;
   amountText?: string;
   statusText?: string;
   sourceUrl?: string;
@@ -20,7 +24,9 @@ export interface AccrualSnapshot {
 
 export interface InvoiceSnapshot {
   apartmentExternalId: string;
+  parentApartmentId?: string;
   periodLabel: string;
+  periodId?: string;
   invoiceUrl?: string;
   utilitiesUrl?: string;
   available: boolean;
@@ -34,6 +40,7 @@ export interface ScanResult {
   accruals: AccrualSnapshot[];
   invoices: InvoiceSnapshot[];
   needsLogin: boolean;
+  degraded: boolean;
   message: string;
 }
 
