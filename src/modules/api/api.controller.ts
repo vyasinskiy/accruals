@@ -59,7 +59,7 @@ export class ApiController {
   }
 
   @Get('invoices/by-period/download')
-  @ApiOperation({ summary: 'Download or stream invoice PDF for apartment/account + YYYYMM period when a local PDF exists' })
+  @ApiOperation({ summary: 'Download invoice PDF for apartment/account + YYYYMM period from configured storage' })
   @ApiQuery({ name: 'apartmentExternalId', type: String, required: true })
   @ApiQuery({ name: 'period', type: String, required: true })
   @ApiProduces('application/pdf')
@@ -69,8 +69,11 @@ export class ApiController {
     @Res() res: any
   ) {
     const result = await this.apiService.getInvoiceByApartmentAndPeriod(apartmentExternalId, period);
+    if (result.downloadUrl) {
+      return res.redirect(result.downloadUrl);
+    }
     if (!result.filePath) {
-      throw new NotFoundException(`No local PDF is available for ${apartmentExternalId} ${period}`);
+      throw new NotFoundException(`No PDF is available for ${apartmentExternalId} ${period}`);
     }
 
     res.setHeader('content-type', 'application/pdf');

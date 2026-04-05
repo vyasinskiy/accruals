@@ -1,7 +1,6 @@
 import crypto from 'node:crypto';
-import fs from 'node:fs/promises';
-import path from 'node:path';
 import type { BrowserContext, Page } from 'playwright';
+import { s3Storage } from '../../common/services/s3-storage.service';
 import { config } from '../../config';
 import type { AccrualSnapshot, ApartmentSnapshot, InvoiceSnapshot, ScanResult } from '../../types';
 
@@ -84,6 +83,19 @@ export class KvartplataAdapter {
       let accountsFound = 0;
       let invoicesDownloaded = 0;
       let invoicesSkipped = 0;
+      const existingS3Keys = new Set<string>();
+
+      if (config.S3_ENABLED && s3Storage.isEnabled()) {
+        try {
+          const prefetchedKeys = await s3Storage.listKeys();
+          for (const key of prefetchedKeys) existingS3Keys.add(key);
+          log(`Prefetched ${existingS3Keys.size} existing invoice file(s) from S3`);
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          warnings.push(`S3 prefetch failed: ${errorMessage}`);
+          log(`S3 prefetch failed: ${errorMessage}`);
+        }
+      }
 
       for (const apartment of selectedApartmentRefs) {
         try {
@@ -102,7 +114,7 @@ export class KvartplataAdapter {
             accruals.push(...accountAccruals);
             log(`Accrual periods found for account ${account.externalId}: ${accountAccruals.length}`);
 
-            const accountInvoices = await this.extractInvoices(page, account, accountAccruals, log);
+            const accountInvoices = await this.extractInvoices(page, account, accountAccruals, existingS3Keys, log);
             invoices.push(...accountInvoices.rows);
             invoicesDownloaded += accountInvoices.downloaded;
             invoicesSkipped += accountInvoices.skipped;
@@ -138,6 +150,7 @@ export class KvartplataAdapter {
     page: Page,
     account: ApartmentSnapshot,
     accruals: AccrualSnapshot[],
+    existingS3Keys: Set<string>,
     log: (message: string) => void
   ): Promise<{ rows: InvoiceSnapshot[]; downloaded: number; skipped: number }> {
     const results: InvoiceSnapshot[] = [];
@@ -148,7 +161,8 @@ export class KvartplataAdapter {
       const invoiceAttempt = await this.tryFetchInvoice(
         page.context(),
         account.externalId,
-        accrual.periodId ?? accrual.periodLabel
+        accrual.periodId ?? accrual.periodLabel,
+        existingS3Keys
       );
 
       if (invoiceAttempt.downloaded) downloaded += 1;
@@ -169,13 +183,15 @@ export class KvartplataAdapter {
         utilitiesUrl: undefined,
         available: invoiceAttempt.available,
         downloaded: invoiceAttempt.downloaded,
-        fingerprint: buildFingerprint('invoice', account.externalId, accrual.periodId ?? accrual.periodLabel, invoiceAttempt.invoiceUrl ?? '', invoiceAttempt.localFilePath ?? ''),
+        fingerprint: buildFingerprint('invoice', account.externalId, accrual.periodId ?? accrual.periodLabel, invoiceAttempt.invoiceUrl ?? '', invoiceAttempt.storageKey ?? ''),
         rawJson: JSON.stringify({
           accountId: account.externalId,
           parentApartmentId: account.parentApartmentId,
           periodId: accrual.periodId ?? accrual.periodLabel,
           invoiceUrl: invoiceAttempt.invoiceUrl,
-          localFilePath: invoiceAttempt.localFilePath
+          localFilePath: invoiceAttempt.storageKey,
+          s3Key: invoiceAttempt.storageKey,
+          storageProvider: invoiceAttempt.storageKey ? 's3' : undefined
         })
       });
     }
@@ -220,13 +236,20 @@ export class KvartplataAdapter {
   private async tryFetchInvoice(
     context: BrowserContext,
     accountId: string,
-    periodId: string
-  ): Promise<{ available: boolean; downloaded: boolean; invoiceUrl: string; localFilePath?: string }> {
+    periodId: string,
+    existingS3Keys: Set<string>
+  ): Promise<{ available: boolean; downloaded: boolean; invoiceUrl: string; storageKey?: string }> {
+    const shouldStoreReceipt = config.DOWNLOAD_RECEIPTS || s3Storage.isEnabled();
     const invoiceUrl = new URL(config.endpoints.invoice, config.API_BASE_URL);
     invoiceUrl.searchParams.set('AccountId', accountId);
     invoiceUrl.searchParams.set('PeriodId', periodId);
+    const storageKey = s3Storage.buildInvoiceKey(accountId, periodId);
 
     try {
+      if (shouldStoreReceipt && s3Storage.isEnabled() && existingS3Keys.has(storageKey)) {
+        return { available: true, downloaded: false, invoiceUrl: invoiceUrl.toString(), storageKey };
+      }
+
       const page = await context.newPage();
       const response = await page.request.get(invoiceUrl.toString(), {
         headers: { accept: 'application/pdf, application/octet-stream, */*' }
@@ -238,15 +261,17 @@ export class KvartplataAdapter {
       const buffer = await response.body();
       await page.close();
 
-      if (!config.DOWNLOAD_RECEIPTS) {
+      if (!shouldStoreReceipt) {
         return { available: true, downloaded: false, invoiceUrl: invoiceUrl.toString() };
       }
 
-      const safeName = `${slug(accountId)}-${slug(periodId)}.pdf`;
-      const localFilePath = path.join(config.receiptDownloadDir, safeName);
-      await fs.mkdir(config.receiptDownloadDir, { recursive: true });
-      await fs.writeFile(localFilePath, buffer);
-      return { available: true, downloaded: true, invoiceUrl: invoiceUrl.toString(), localFilePath };
+      if (!s3Storage.isEnabled()) {
+        throw new Error('S3 storage is required when DOWNLOAD_RECEIPTS=true');
+      }
+
+      await s3Storage.uploadPdf(storageKey, buffer);
+      existingS3Keys.add(storageKey);
+      return { available: true, downloaded: true, invoiceUrl: invoiceUrl.toString(), storageKey };
     } catch {
       return { available: false, downloaded: false, invoiceUrl: invoiceUrl.toString() };
     }
@@ -293,22 +318,50 @@ function extractAccounts(apartment: ApartmentSnapshot, payload: unknown): Apartm
 }
 
 function extractAccruals(account: ApartmentSnapshot, payload: unknown): AccrualSnapshot[] {
-  return dedupe(collectObjects(payload)
+  const rows = findObjectsAtKeys(payload, ['accruals', 'Accruals']);
+  const sourceRows = rows.length ? rows : collectObjects(payload);
+
+  return dedupe(sourceRows
     .map((row) => {
       const periodId = pickString(row, ['periodId', 'PeriodId', 'period', 'Period', 'month', 'Month']);
       const periodLabel = periodId ?? pickString(row, ['name', 'Name', 'caption', 'Caption']) ?? 'unknown';
-      const amountText = pickString(row, ['amount', 'Amount', 'sum', 'Sum', 'value', 'accruedAmount', 'AccruedAmount']);
-      const statusText = pickString(row, ['status', 'Status', 'state']);
-      const sourceUrl = undefined;
+
+      const initialBalance = pickString(row, ['initialBalance', 'InitialBalance']);
+      const accruedAmount = pickString(row, ['accruedAmount', 'AccruedAmount', 'amount', 'Amount', 'sum', 'Sum', 'value']);
+      const fine = pickString(row, ['fine', 'Fine']);
+      const amountToPay = pickString(row, ['amountToPay', 'AmountToPay']);
+      const paidAmount = pickString(row, ['paidAmount', 'PaidAmount']);
+      const hasInvoice = pickString(row, ['hasInvoice', 'HasInvoice']);
+      const buttonInvoice = pickString((row.button && typeof row.button === 'object' ? row.button : {}) as Record<string, unknown>, ['invoice']);
+      const buttonPay = pickString((row.button && typeof row.button === 'object' ? row.button : {}) as Record<string, unknown>, ['pay']);
+      const buttonToPay = pickString((row.button && typeof row.button === 'object' ? row.button : {}) as Record<string, unknown>, ['toPay']);
+      const buttonMessage = pickString((row.button && typeof row.button === 'object' ? row.button : {}) as Record<string, unknown>, ['message', 'Message']);
+
+      const amountText = [
+        initialBalance ? `initialBalance=${initialBalance}` : null,
+        accruedAmount ? `accruedAmount=${accruedAmount}` : null,
+        fine ? `fine=${fine}` : null,
+        amountToPay ? `amountToPay=${amountToPay}` : null,
+        paidAmount ? `paidAmount=${paidAmount}` : null
+      ].filter(Boolean).join(', ');
+
+      const statusText = [
+        hasInvoice ? `hasInvoice=${hasInvoice}` : null,
+        buttonInvoice ? `button.invoice=${buttonInvoice}` : null,
+        buttonPay ? `button.pay=${buttonPay}` : null,
+        buttonToPay ? `button.toPay=${buttonToPay}` : null,
+        buttonMessage ? `button.message=${buttonMessage}` : null
+      ].filter(Boolean).join(', ');
+
       return {
         apartmentExternalId: account.externalId,
         parentApartmentId: account.parentApartmentId,
         periodLabel,
         periodId,
-        amountText,
-        statusText,
-        sourceUrl,
-        fingerprint: buildFingerprint('accrual', account.externalId, periodId ?? periodLabel, amountText ?? '', statusText ?? ''),
+        amountText: amountText || undefined,
+        statusText: statusText || undefined,
+        sourceUrl: undefined,
+        fingerprint: buildFingerprint('accrual', account.externalId, periodId ?? periodLabel, amountText, statusText),
         rawJson: JSON.stringify({ account, accrual: row })
       };
     })

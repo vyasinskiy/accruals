@@ -4,6 +4,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { ApartmentsService } from '../../common/services/apartments.service';
+import { s3Storage } from '../../common/services/s3-storage.service';
 import { config } from '../../config';
 import { QueryAccrualsDto } from './dto/query-accruals.dto';
 import { QueryApartmentsDto } from './dto/query-apartments.dto';
@@ -78,16 +79,25 @@ export class ApiService {
       throw new NotFoundException(`Invoice for ${apartmentExternalId} and period ${period} not found`);
     }
 
-    const filePath = resolveExistingFile(invoice.localFilePath);
+    const parsedRaw = safeJsonParse<Record<string, unknown>>(invoice.rawJson);
+    const storageKey = typeof parsedRaw?.s3Key === 'string'
+      ? parsedRaw.s3Key
+      : isS3Key(invoice.localFilePath)
+        ? invoice.localFilePath
+        : null;
+    const filePath = storageKey ? null : resolveExistingFile(invoice.localFilePath);
+    const downloadUrl = storageKey ? s3Storage.getSignedDownloadUrl(storageKey) : null;
 
     return {
       apartment,
       invoice,
       periodRequested: period,
       periodNormalized: normalizedPeriod,
-      fileExists: Boolean(filePath),
+      fileExists: Boolean(filePath || downloadUrl),
       filePath,
-      filename: filePath ? path.basename(filePath) : null
+      storageKey,
+      downloadUrl,
+      filename: filePath ? path.basename(filePath) : storageKey ? path.basename(storageKey) : null
     };
   }
 
@@ -107,4 +117,17 @@ function resolveExistingFile(filePath?: string | null): string | null {
   if (!filePath) return null;
   const absolute = path.isAbsolute(filePath) ? filePath : path.resolve(config.rootDir, filePath);
   return fs.existsSync(absolute) ? absolute : null;
+}
+
+function isS3Key(value?: string | null): value is string {
+  return Boolean(value && !path.isAbsolute(value) && !value.startsWith('.') && value.toLowerCase().endsWith('.pdf'));
+}
+
+function safeJsonParse<T>(value: string | null | undefined): T | null {
+  if (!value) return null;
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return null;
+  }
 }
