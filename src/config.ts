@@ -1,46 +1,32 @@
-import path from 'node:path';
 import fs from 'node:fs';
+import path from 'node:path';
 import dotenv from 'dotenv';
 import { z } from 'zod';
 
 dotenv.config();
 
 const schema = z.object({
-  TZ: z.string().default('America/Los_Angeles'),
+  NODE_ENV: z.string().default('development'),
+  PORT: z.coerce.number().int().min(1).max(65535).default(3000),
   APP_URL: z.string().url().default('https://kvartplata.online/'),
-  APP_TIMEZONE: z.string().default('America/Los_Angeles'),
+  LOGIN_URL: z.string().url().default('https://kvartplata.online/'),
+  ACCOUNT_PAGE_URL: z.string().optional().default('https://kvartplata.online/new-web/apartments'),
+  API_BASE_URL: z.string().url().default('https://kvartplata.online'),
   DATA_DIR: z.string().default('./data'),
   STORAGE_STATE_PATH: z.string().default('./data/storage-state.json'),
   DATABASE_URL: z.string().min(1).default('postgresql://postgres:postgres@localhost:5432/kvartplata_watcher?schema=public'),
   HEADLESS: z.coerce.boolean().default(true),
-  LOG_LEVEL: z.string().default('info'),
-  LOGIN_URL: z.string().url().default('https://kvartplata.online/'),
-  LOGIN_REQUIRED_TEXT: z.string().default('Войти,Авторизация,Капча,CAPTCHA,Личный кабинет'),
-  ACCOUNT_READY_TEXT: z.string().default('Начисления,Квитанция,Лицевой счет,Личный кабинет'),
-  SESSION_REQUIRED_KEYWORDS: z.string().default('войти,авторизация,captcha,капча'),
-  ACCOUNT_PAGE_URL: z.string().optional().default(''),
-  CHARGES_PAGE_URL: z.string().optional().default(''),
-  CHARGES_TAB_SELECTOR: z.string().default('text=/Начисления|Платежи|Квитанции/i'),
-  ACCOUNT_CARD_SELECTOR: z.string().default('[data-account], .account-card, .abonent-item, .ls-item'),
-  ACCOUNT_NAME_SELECTOR: z.string().default('.account-card__title, .account-name, .abonent-item__title, .title'),
-  ACCOUNT_ID_SELECTOR: z.string().default('.account-card__number, .ls-number, .account-number, .subtitle'),
-  ACCOUNT_LINK_SELECTOR: z.string().default('a'),
-  ROW_SELECTOR: z.string().default('table tbody tr, .charges-table tbody tr, .receipt-row, .payment-row'),
-  MONTH_SELECTOR: z.string().default('[data-month], .month, td:nth-child(1)'),
-  AMOUNT_SELECTOR: z.string().default('[data-amount], .amount, td:nth-child(2)'),
-  STATUS_SELECTOR: z.string().default('[data-status], .status, td:nth-child(3)'),
-  RECEIPT_BUTTON_SELECTOR: z.string().default('a:has-text("Квитанция"), button:has-text("Квитанция"), [title*="Квитанц"]'),
-  NEXT_PAGE_SELECTOR: z.string().optional().default(''),
   WAIT_AFTER_LOGIN_MS: z.coerce.number().default(3000),
   WAIT_AFTER_NAV_MS: z.coerce.number().default(1500),
+  SESSION_REQUIRED_KEYWORDS: z.string().default('войти,авторизация,captcha,капча'),
+  ACCOUNT_READY_TEXT: z.string().default('Начисления,Квитанция,Лицевой счет,Личный кабинет'),
   DOWNLOAD_RECEIPTS: z.coerce.boolean().default(false),
   RECEIPT_DOWNLOAD_DIR: z.string().default('./data/receipts'),
   TELEGRAM_BOT_TOKEN: z.string().optional(),
   TELEGRAM_CHAT_ID: z.string().optional(),
   TELEGRAM_SILENT: z.coerce.boolean().default(false),
-  SCHEDULE_ENABLED: z.coerce.boolean().default(false),
-  SCHEDULE_HOUR: z.coerce.number().int().min(0).max(23).default(9),
-  SCHEDULE_MINUTE: z.coerce.number().int().min(0).max(59).default(0)
+  SCRAPE_CRON: z.string().default('0 9 * * *'),
+  TZ: z.string().default('America/Los_Angeles')
 });
 
 const raw = schema.parse(process.env);
@@ -53,9 +39,14 @@ export const config = {
   dataDir: resolvePath(raw.DATA_DIR),
   storageStatePath: resolvePath(raw.STORAGE_STATE_PATH),
   receiptDownloadDir: resolvePath(raw.RECEIPT_DOWNLOAD_DIR),
-  loginRequiredTextList: splitCsv(raw.LOGIN_REQUIRED_TEXT),
+  sessionRequiredKeywords: splitCsv(raw.SESSION_REQUIRED_KEYWORDS).map((x) => x.toLowerCase()),
   accountReadyTextList: splitCsv(raw.ACCOUNT_READY_TEXT),
-  sessionRequiredKeywords: splitCsv(raw.SESSION_REQUIRED_KEYWORDS).map((x) => x.toLowerCase())
+  endpoints: {
+    apartments: '/new-web/apartments',
+    accruals: '/new-web/accruals',
+    utilities: '/new-web/utilities',
+    invoice: '/new-web/Accruals/invoice'
+  }
 };
 
 for (const dir of [config.dataDir, path.dirname(config.storageStatePath), config.receiptDownloadDir]) {

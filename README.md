@@ -1,30 +1,60 @@
 # kvartplata-watcher
 
-Pragmatic Node.js + TypeScript watcher for `kvartplata.online`.
+Pragmatic local-only backend for `kvartplata.online` built with **Node.js + TypeScript + NestJS structure + Playwright + Prisma + PostgreSQL**.
 
-What it does:
-- opens Playwright in **manual bootstrap mode** so a human can log in and solve captcha if needed
-- saves and reuses browser session state (`storageState`)
-- scans account/charges pages for receipt metadata
-- stores runs, observations, and deduplicated receipts in **PostgreSQL via Prisma**
-- sends Telegram alerts when new receipts appear
-- sends Telegram alerts when the saved session is expired and manual re-login is needed
+It keeps the important constraint intact: **login stays manual**. You open the real site once, solve captcha yourself if needed, and the backend reuses the saved authenticated session for internal API calls.
 
-What it intentionally does **not** do:
-- it does **not** automate captcha-protected login
-- it does **not** promise perfect DOM selectors for a site that may change
-- PDF download is optional and tracked separately from receipt metadata
+## What changed
 
-## Project layout
+The project is now split into two backend modules:
 
-- `src/adapter.ts` - Playwright adapter for kvartplata.online
-- `src/app.ts` - bootstrap + scan orchestration
-- `src/db.ts` - Prisma-backed persistence
-- `src/telegram.ts` - Telegram notifications
-- `src/cli.ts` - CLI commands
-- `prisma/schema.prisma` - Prisma models
-- `docker-compose.yml` - local PostgreSQL for development
-- `.env.example` - configuration template
+1. **Scraping module**
+   - session-aware Playwright adapter
+   - cron-triggered scheduled scan
+   - manual HTTP endpoint to trigger a scan
+   - uses a reusable apartment query service backed by Prisma instead of hardcoded object handling
+   - preserves the discovered internal API approach:
+     - `/new-web/apartments`
+     - `/new-web/accruals`
+     - `/new-web/utilities`
+     - `/new-web/Accruals/invoice`
+
+2. **API module**
+   - DB-backed apartment/object endpoints
+   - DB-backed accrual endpoints
+   - DB-backed invoice/receipt metadata endpoints
+   - Swagger/OpenAPI documentation
+
+## Architecture
+
+```text
+src/
+  main.ts                        # Nest bootstrap + Swagger
+  app.module.ts
+  common/
+    prisma/                      # Prisma module/service
+    services/apartments.service.ts
+  modules/
+    scraping/
+      adapter.ts                 # Playwright + kvartplata internal API client
+      scraping.service.ts        # cron/manual orchestration + persistence
+      scraping.controller.ts     # POST /scraping/scan
+    api/
+      api.service.ts             # query layer
+      api.controller.ts          # /api/* endpoints
+  scripts/
+    bootstrap.ts                 # manual login flow
+    scan.ts                      # one-off local scan
+prisma/schema.prisma             # apartments, accruals, invoices, runs
+```
+
+## Data model
+
+Main Prisma entities:
+- `Apartment` — local copy of apartment/object metadata
+- `Accrual` — accrual rows from `/new-web/accruals`
+- `Invoice` — invoice/receipt metadata from `/new-web/utilities` and `/new-web/Accruals/invoice`
+- `Run` — scan execution history
 
 ## Install
 
@@ -35,164 +65,155 @@ npm install
 npx playwright install chromium
 ```
 
-## Start PostgreSQL locally
+## Start PostgreSQL
 
 ```bash
 docker compose up -d postgres
-```
-
-Default local database credentials in `docker-compose.yml` and `.env.example`:
-- database: `kvartplata_watcher`
-- user: `postgres`
-- password: `postgres`
-- port: `5432`
-
-## Initialize Prisma / database schema
-
-```bash
 npm run prisma:generate
 npm run db:init
 ```
 
-If you prefer checked-in SQL migrations instead of schema push:
+This project is intentionally optimized for local development. `prisma db push` is the fastest path here.
 
-```bash
-npm run prisma:migrate
-```
+## Manual bootstrap flow
 
-`db:init` uses `prisma db push`, which is the fastest local bootstrap path. `prisma:migrate` applies the checked-in migration files.
-
-## Configure
-
-At minimum set these in `.env`:
-
-```env
-APP_URL=https://kvartplata.online/
-LOGIN_URL=https://kvartplata.online/
-DATABASE_URL=postgresql://postgres:postgres@localhost:5432/kvartplata_watcher?schema=public
-TELEGRAM_BOT_TOKEN=...
-TELEGRAM_CHAT_ID=...
-```
-
-Then tune selectors if the real site DOM differs from the defaults. The adapter is deliberately configurable because `kvartplata.online` may render different account pages for different управляющие компании or tenants.
-
-Important selector/config knobs:
-- `ACCOUNT_PAGE_URL`, `CHARGES_PAGE_URL`
-- `ACCOUNT_CARD_SELECTOR`, `ACCOUNT_NAME_SELECTOR`, `ACCOUNT_ID_SELECTOR`, `ACCOUNT_LINK_SELECTOR`
-- `ROW_SELECTOR`, `MONTH_SELECTOR`, `AMOUNT_SELECTOR`, `STATUS_SELECTOR`
-- `RECEIPT_BUTTON_SELECTOR`
-- `DOWNLOAD_RECEIPTS=true` if receipt PDF downloading is actually working for your account flow
-
-## Bootstrap manual login
-
-This is the required first step.
+Do this first.
 
 ```bash
 npm run bootstrap
 ```
 
 Flow:
-1. Chromium opens in headed mode.
-2. You log in manually.
+1. Browser opens in headed mode.
+2. You log in manually at `kvartplata.online`.
 3. If captcha appears, you solve it manually.
-4. Return to the terminal and press Enter.
-5. The script checks whether login still looks required.
-6. If login succeeded, it saves Playwright storage state to `STORAGE_STATE_PATH`.
+4. Return to terminal and press Enter.
+5. Storage state is saved to `data/storage-state.json`.
 
-If the site still shows login/captcha text, bootstrap fails on purpose instead of pretending the session is valid.
+If login still looks required, bootstrap fails on purpose. No fake automation, no captcha bypassing.
 
-## Scan without notifying
+## Run the backend
 
 ```bash
-npm run scan
+npm run start
 ```
 
-This:
-- reuses the saved storage state
-- goes to the account page
-- attempts to open the charges/receipts tab
-- extracts current rows like month, amount, status, and receipt button presence
-- stores every observation in PostgreSQL
-- inserts new receipts only once based on a fingerprint derived from account + month + amount + status + receipt URL
+Default URLs:
+- API: `http://localhost:3000`
+- Swagger UI: `http://localhost:3000/docs`
+- OpenAPI JSON: `http://localhost:3000/docs-json`
 
-## Scan and notify
+## Cron + manual scan flow
+
+### Scheduled scan
+
+The scraping module registers a Nest cron job using `SCRAPE_CRON`.
+
+Default:
+```env
+SCRAPE_CRON=0 9 * * *
+TZ=America/Los_Angeles
+```
+
+Meaning: once a day at 09:00 local time the backend will try to reuse the saved Playwright session and scan the kvartplata internal APIs.
+
+### Manual scan over HTTP
 
 ```bash
-npm run run
+curl -X POST http://localhost:3000/scraping/scan \
+  -H 'content-type: application/json' \
+  -d '{}'
+```
+
+Optional filter example:
+
+```bash
+curl -X POST http://localhost:3000/scraping/scan \
+  -H 'content-type: application/json' \
+  -d '{"organization":"Краснодар","trigger":"manual"}'
 ```
 
 Behavior:
-- if new receipts are detected, sends a Telegram summary
-- if the session is expired or login is required, sends a Telegram alert saying manual bootstrap is needed
-- if nothing changed, it stays quiet
+- if DB already has apartments, the scraper uses the reusable DB query service to decide what to scan
+- if DB is empty, it first loads apartments from `/new-web/apartments`
+- then it queries accruals/invoice metadata through the discovered internal endpoints
+- if session expired, the run is marked `needs_login`
 
-## Local scheduler / cron
+## API examples
 
-### Option A: cron at 9:00 local time
+### Query apartments
 
-Use the OS cron scheduler. Example:
-
-```cron
-TZ=America/Los_Angeles
-0 9 * * * cd /Users/torrnd/.openclaw/workspace/kvartplata-watcher && /opt/homebrew/bin/node ./node_modules/.bin/tsx src/cli.ts run >> ./data/cron.log 2>&1
-```
-
-On macOS you may prefer `launchd`, but cron is the simplest documented option.
-
-### Option B: in-process scheduler
+List all apartments:
 
 ```bash
-npm run scheduler
+curl 'http://localhost:3000/api/apartments'
 ```
 
-This keeps a local Node process alive and checks once per minute whether it is the configured target time.
-
-Relevant env vars:
-
-```env
-SCHEDULE_HOUR=9
-SCHEDULE_MINUTE=0
-APP_TIMEZONE=America/Los_Angeles
-```
-
-## Prisma / PostgreSQL data model
-
-Tables/models:
-- `runs` - each scan attempt and its final status
-- `receipts` - deduplicated receipt metadata, first seen / last seen
-- `receipt_observations` - every observation event linked to a run and receipt
-
-Receipt metadata is stored even if PDF download is unavailable. Fields include:
-- account id
-- month label
-- amount text
-- status text
-- receipt button presence
-- receipt URL if visible
-- `receipt_downloaded` boolean
-
-## Typical commands
+By address:
 
 ```bash
-docker compose up -d postgres
-npm run prisma:generate
-npm run db:init
+curl 'http://localhost:3000/api/apartments?address=Краснодар'
+```
+
+By organization:
+
+```bash
+curl 'http://localhost:3000/api/apartments?organization=УК'
+```
+
+One apartment with recent linked data:
+
+```bash
+curl 'http://localhost:3000/api/apartments/1'
+```
+
+### Query accruals
+
+```bash
+curl 'http://localhost:3000/api/accruals?apartmentExternalId=12345'
+curl 'http://localhost:3000/api/accruals?periodLabel=2026-02'
+```
+
+### Query invoices / receipt metadata
+
+```bash
+curl 'http://localhost:3000/api/invoices?apartmentExternalId=12345'
+curl 'http://localhost:3000/api/invoices?available=true'
+```
+
+### Recent scan history
+
+```bash
+curl 'http://localhost:3000/api/runs'
+curl 'http://localhost:3000/scraping/runs'
+```
+
+## Useful commands
+
+```bash
 npm run bootstrap
 npm run scan
-npm run run
+npm run start
 npm run build
 npm run typecheck
+npm run prisma:generate
+npm run db:init
 ```
 
 ## Limitations / sharp edges
 
-- `kvartplata.online` appears to be partly dynamic, so selectors may need adjustment per account layout.
-- Session expiry detection is heuristic, based on page text keywords. If the site changes copy, update `.env` keywords.
-- PDF download is best-effort only.
-- If the site requires extra clicks or month selection widgets, extend `src/adapter.ts` for your exact account flow.
-- I could not safely automate a real authenticated walkthrough here, so the default adapter is intentionally conservative and configurable.
-- No automated SQLite-to-Postgres data migration is included. This change switches persistence going forward.
+- This still depends on a valid manually created session. If the session expires, you must rerun `npm run bootstrap`.
+- The exact JSON shape of kvartplata internal endpoints can vary. The scraper currently uses pragmatic field extraction heuristics instead of pretending the API is stable and documented.
+- Invoice download remains best-effort and local-only.
+- There is no captcha automation by design.
+- No production deployment work was added. This is a local dev backend, as requested.
 
-## Next practical step
+## Recommendation
 
-Start Postgres, run Prisma init, run bootstrap once, then inspect the first `npm run scan` output and tweak selectors in `.env` or `src/adapter.ts` against the real DOM. That is the narrowest remaining risk.
+The narrowest remaining risk is the exact response shape of the internal `kvartplata.online` endpoints for your account. Start with:
+
+1. `npm run bootstrap`
+2. `npm run start`
+3. `POST /scraping/scan`
+4. inspect Swagger + DB rows
+5. tighten field mapping in `src/modules/scraping/adapter.ts` only if your account returns a weird payload
