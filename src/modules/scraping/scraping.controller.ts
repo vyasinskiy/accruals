@@ -6,7 +6,10 @@ import { ManualScanDto } from './dto/manual-scan.dto';
 @ApiTags('scraping')
 @Controller('scraping')
 export class ScrapingController {
-  constructor(private readonly scrapingService: ScrapingService) {}
+  constructor(private readonly scrapingService: ScrapingService) {
+    this.scan = this.scan.bind(this);
+    this.getRuns = this.getRuns.bind(this);
+  }
 
   @Post('scan')
   @ApiOperation({ summary: 'Manually trigger a session-based scan' })

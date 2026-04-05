@@ -7,7 +7,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "start": "tsx src/main.ts",
+    "start": "npm run build && node dist/main.js",
     "start:dev": "tsx watch src/main.ts",
     "bootstrap": "tsx src/scripts/bootstrap.ts",
     "scan": "tsx src/scripts/scan.ts",

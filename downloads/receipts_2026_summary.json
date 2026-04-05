@@ -1,0 +1,54 @@
+[
+  {
+    "apartmentId": 378621,
+    "accountId": 7751294,
+    "address": "г Краснодар, ул им. Академика Лукьяненко П.П., д 28, цок. 24",
+    "periodId": 202604,
+    "accruedAmount": 0,
+    "fine": 0,
+    "paidAmount": 3500,
+    "initialBalance": -5045,
+    "hasInvoice": false,
+    "file": null,
+    "status": "no-invoice"
+  },
+  {
+    "apartmentId": 378621,
+    "accountId": 7751294,
+    "address": "г Краснодар, ул им. Академика Лукьяненко П.П., д 28, цок. 24",
+    "periodId": 202603,
+    "accruedAmount": 1048.33,
+    "fine": 33.26,
+    "paidAmount": 0,
+    "initialBalance": -3996.67,
+    "hasInvoice": true,
+    "file": "downloads/receipt_7751294_202603.pdf",
+    "status": "downloaded"
+  },
+  {
+    "apartmentId": 378621,
+    "accountId": 7751294,
+    "address": "г Краснодар, ул им. Академика Лукьяненко П.П., д 28, цок. 24",
+    "periodId": 202602,
+    "accruedAmount": 1029.37,
+    "fine": 14.3,
+    "paidAmount": 0,
+    "initialBalance": -2967.3,
+    "hasInvoice": true,
+    "file": "downloads/receipt_7751294_202602.pdf",
+    "status": "downloaded"
+  },
+  {
+    "apartmentId": 378621,
+    "accountId": 7751294,
+    "address": "г Краснодар, ул им. Академика Лукьяненко П.П., д 28, цок. 24",
+    "periodId": 202601,
+    "accruedAmount": 1021.65,
+    "fine": 6.58,
+    "paidAmount": 0,
+    "initialBalance": -1945.65,
+    "hasInvoice": true,
+    "file": "downloads/receipt_7751294_202601.pdf",
+    "status": "downloaded"
+  }
+]

@@ -8,35 +8,40 @@ datasource db {
 }
 
 model Run {
-  id               Int      @id @default(autoincrement())
-  startedAt        DateTime @map("started_at")
-  finishedAt       DateTime? @map("finished_at")
-  trigger          String   @default("manual")
-  status           String
-  message          String
-  apartmentsScanned Int     @default(0) @map("apartments_scanned")
-  accrualsObserved Int      @default(0) @map("accruals_observed")
-  invoicesObserved Int      @default(0) @map("invoices_observed")
-  newApartments    Int      @default(0) @map("new_apartments")
-  newAccruals      Int      @default(0) @map("new_accruals")
-  newInvoices      Int      @default(0) @map("new_invoices")
-  needsLogin       Boolean  @default(false) @map("needs_login")
-  summaryJson      String   @default("{}") @map("summary_json")
+  id                Int       @id @default(autoincrement())
+  startedAt         DateTime  @map("started_at")
+  finishedAt        DateTime? @map("finished_at")
+  trigger           String    @default("manual")
+  status            String
+  message           String
+  apartmentsScanned Int       @default(0) @map("apartments_scanned")
+  accrualsObserved  Int       @default(0) @map("accruals_observed")
+  invoicesObserved  Int       @default(0) @map("invoices_observed")
+  newApartments     Int       @default(0) @map("new_apartments")
+  newAccruals       Int       @default(0) @map("new_accruals")
+  newInvoices       Int       @default(0) @map("new_invoices")
+  needsLogin        Boolean   @default(false) @map("needs_login")
+  summaryJson       String    @default("{}") @map("summary_json")
+
+  // legacy columns from the previous partial app; kept so db push stays non-destructive
+  accountsScannedLegacy  Int @default(0) @map("accounts_scanned")
+  receiptsObservedLegacy Int @default(0) @map("receipts_observed")
+  newReceiptsLegacy      Int @default(0) @map("new_receipts")
 
   @@map("runs")
 }
 
 model Apartment {
-  id               Int       @id @default(autoincrement())
-  externalId       String    @unique @map("external_id")
-  address          String?
-  organization     String?
-  accountNumber    String?   @map("account_number")
-  rawJson          String?   @map("raw_json")
-  firstSeenAt      DateTime  @map("first_seen_at")
-  lastSeenAt       DateTime  @map("last_seen_at")
-  accruals         Accrual[]
-  invoices         Invoice[]
+  id            Int       @id @default(autoincrement())
+  externalId    String    @unique @map("external_id")
+  address       String?
+  organization  String?
+  accountNumber String?   @map("account_number")
+  rawJson       String?   @map("raw_json")
+  firstSeenAt   DateTime  @map("first_seen_at")
+  lastSeenAt    DateTime  @map("last_seen_at")
+  accruals      Accrual[]
+  invoices      Invoice[]
 
   @@index([address], map: "idx_apartments_address")
   @@index([organization], map: "idx_apartments_organization")
@@ -45,38 +50,56 @@ model Apartment {
 }
 
 model Accrual {
-  id                 Int       @id @default(autoincrement())
-  apartmentId        Int       @map("apartment_id")
-  apartmentExternalId String   @map("apartment_external_id")
-  periodLabel        String    @map("period_label")
-  amountText         String?   @map("amount_text")
-  statusText         String?   @map("status_text")
-  sourceUrl          String?   @map("source_url")
-  fingerprint        String    @unique
-  rawJson            String?   @map("raw_json")
-  firstSeenAt        DateTime  @map("first_seen_at")
-  lastSeenAt         DateTime  @map("last_seen_at")
-  apartment          Apartment @relation(fields: [apartmentId], references: [id], onDelete: Cascade)
+  id                  Int       @id @default(autoincrement())
+  apartmentId         Int       @map("apartment_id")
+  apartmentExternalId String    @map("apartment_external_id")
+  periodLabel         String    @map("period_label")
+  amountText          String?   @map("amount_text")
+  statusText          String?   @map("status_text")
+  sourceUrl           String?   @map("source_url")
+  fingerprint         String    @unique
+  rawJson             String?   @map("raw_json")
+  firstSeenAt         DateTime  @map("first_seen_at")
+  lastSeenAt          DateTime  @map("last_seen_at")
+  apartment           Apartment @relation(fields: [apartmentId], references: [id], onDelete: Cascade)
 
   @@index([apartmentId, periodLabel], map: "idx_accruals_apartment_period")
   @@map("accruals")
 }
 
 model Invoice {
-  id                 Int       @id @default(autoincrement())
-  apartmentId        Int       @map("apartment_id")
-  apartmentExternalId String   @map("apartment_external_id")
-  periodLabel        String    @map("period_label")
-  invoiceUrl         String?   @map("invoice_url")
-  utilitiesUrl       String?   @map("utilities_url")
-  available          Boolean   @default(false)
-  downloaded         Boolean   @default(false)
-  fingerprint        String    @unique
-  rawJson            String?   @map("raw_json")
-  firstSeenAt        DateTime  @map("first_seen_at")
-  lastSeenAt         DateTime  @map("last_seen_at")
-  apartment          Apartment @relation(fields: [apartmentId], references: [id], onDelete: Cascade)
+  id                  Int       @id @default(autoincrement())
+  apartmentId         Int       @map("apartment_id")
+  apartmentExternalId String    @map("apartment_external_id")
+  periodLabel         String    @map("period_label")
+  invoiceUrl          String?   @map("invoice_url")
+  utilitiesUrl        String?   @map("utilities_url")
+  localFilePath       String?   @map("local_file_path")
+  available           Boolean   @default(false)
+  downloaded          Boolean   @default(false)
+  fingerprint         String    @unique
+  rawJson             String?   @map("raw_json")
+  firstSeenAt         DateTime  @map("first_seen_at")
+  lastSeenAt          DateTime  @map("last_seen_at")
+  apartment           Apartment @relation(fields: [apartmentId], references: [id], onDelete: Cascade)
 
   @@index([apartmentId, periodLabel], map: "idx_invoices_apartment_period")
   @@map("invoices")
+}
+
+model LegacyReceipt {
+  id                Int      @id @default(autoincrement())
+  accountExternalId String   @map("account_external_id")
+  monthLabel        String   @map("month_label")
+  amountText        String   @map("amount_text")
+  statusText        String?  @map("status_text")
+  receiptAvailable  Boolean  @default(false) @map("receipt_available")
+  receiptUrl        String?  @map("receipt_url")
+  receiptDownloaded Boolean  @default(false) @map("receipt_downloaded")
+  fingerprint       String   @unique
+  firstSeenAt       DateTime @map("first_seen_at")
+  lastSeenAt        DateTime @map("last_seen_at")
+  rawJson           String?  @map("raw_json")
+
+  @@map("receipts")
 }

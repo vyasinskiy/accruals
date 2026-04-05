@@ -3,19 +3,19 @@ import { Transform, Type } from 'class-transformer';
 import { IsInt, IsOptional, IsString } from 'class-validator';
 
 export class QueryAccrualsDto {
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ type: Number })
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   apartmentId?: number;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ type: String })
   @IsOptional()
   @IsString()
   @Transform(({ value }) => typeof value === 'string' ? value.trim() : value)
   apartmentExternalId?: string;
 
-  @ApiPropertyOptional({ description: 'Month/period label from the source system' })
+  @ApiPropertyOptional({ type: String, description: 'Month/period label from the source system' })
   @IsOptional()
   @IsString()
   @Transform(({ value }) => typeof value === 'string' ? value.trim() : value)

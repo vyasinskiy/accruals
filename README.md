@@ -1,123 +1,94 @@
 # kvartplata-watcher
 
-Pragmatic local-only backend for `kvartplata.online` built with **Node.js + TypeScript + NestJS structure + Playwright + Prisma + PostgreSQL**.
+Local NestJS + Prisma + Postgres + Playwright app for **manual-session** kvartplata scraping.
 
-It keeps the important constraint intact: **login stays manual**. You open the real site once, solve captcha yourself if needed, and the backend reuses the saved authenticated session for internal API calls.
+## Blunt status
 
-## What changed
+### Fully working now
 
-The project is now split into two backend modules:
+- `npm run start` starts without Swagger crashing.
+- Swagger UI works at `http://localhost:3000/docs`.
+- Postgres-backed API works for apartments, accruals, invoices, and run history.
+- `POST /scraping/scan` persists data into Postgres.
+- The **confirmed real case** is wired through the app: account/apartment `7751294` with invoice PDFs for `202601`, `202602`, `202603`.
+- Invoice lookup/download works through the API:
+  - metadata: `GET /api/invoices/by-period?apartmentExternalId=7751294&period=202603`
+  - PDF stream: `GET /api/invoices/by-period/download?apartmentExternalId=7751294&period=202603`
 
-1. **Scraping module**
-   - session-aware Playwright adapter
-   - cron-triggered scheduled scan
-   - manual HTTP endpoint to trigger a scan
-   - uses a reusable apartment query service backed by Prisma instead of hardcoded object handling
-   - preserves the discovered internal API approach:
-     - `/new-web/apartments`
-     - `/new-web/accruals`
-     - `/new-web/utilities`
-     - `/new-web/Accruals/invoice`
+### Still limited / honest caveats
 
-2. **API module**
-   - DB-backed apartment/object endpoints
-   - DB-backed accrual endpoints
-   - DB-backed invoice/receipt metadata endpoints
-   - Swagger/OpenAPI documentation
+- The upstream internal endpoint currently configured in the adapter returns `404` for `/new-web/apartments` in this environment.
+- Because of that, **generic multi-apartment discovery is not fully solved yet**.
+- The app does **not** fake that away: manual scans still try the real Playwright/session-based path first, but also import the already-confirmed local receipt dataset so the known working apartment/account is usable end-to-end right now.
+- No captcha bypass was added. Session bootstrap is still manual by design.
 
-## Architecture
+## Stack kept intact
 
-```text
-src/
-  main.ts                        # Nest bootstrap + Swagger
-  app.module.ts
-  common/
-    prisma/                      # Prisma module/service
-    services/apartments.service.ts
-  modules/
-    scraping/
-      adapter.ts                 # Playwright + kvartplata internal API client
-      scraping.service.ts        # cron/manual orchestration + persistence
-      scraping.controller.ts     # POST /scraping/scan
-    api/
-      api.service.ts             # query layer
-      api.controller.ts          # /api/* endpoints
-  scripts/
-    bootstrap.ts                 # manual login flow
-    scan.ts                      # one-off local scan
-prisma/schema.prisma             # apartments, accruals, invoices, runs
+- NestJS
+- Prisma
+- PostgreSQL
+- Playwright
+- Swagger
+
+## Requirements
+
+- Node 24+
+- PostgreSQL running locally and reachable by `DATABASE_URL`
+- A valid Playwright storage state for manual-session mode if you want to keep probing the live site
+
+## Environment
+
+Copy and adjust `.env` if needed. Current project expects local Postgres like:
+
+```env
+DATABASE_URL=postgresql://torrnd@localhost:5432/kvartplata_watcher?schema=public
 ```
 
-## Data model
+Important paths already used by the app:
 
-Main Prisma entities:
-- `Apartment` — local copy of apartment/object metadata
-- `Accrual` — accrual rows from `/new-web/accruals`
-- `Invoice` — invoice/receipt metadata from `/new-web/utilities` and `/new-web/Accruals/invoice`
-- `Run` — scan execution history
+- storage state: `./data/storage-state.json`
+- confirmed local receipts: `./downloads/receipts_2026_summary.json`
+- confirmed PDFs:
+  - `./downloads/receipt_7751294_202601.pdf`
+  - `./downloads/receipt_7751294_202602.pdf`
+  - `./downloads/receipt_7751294_202603.pdf`
 
-## Install
+## Exact local run commands
+
+Install deps:
 
 ```bash
-cd /Users/torrnd/.openclaw/workspace/kvartplata-watcher
-cp .env.example .env
 npm install
-npx playwright install chromium
 ```
 
-## Start PostgreSQL
+Generate Prisma client and sync schema:
 
 ```bash
-docker compose up -d postgres
 npm run prisma:generate
 npm run db:init
 ```
 
-This project is intentionally optimized for local development. `prisma db push` is the fastest path here.
-
-## Manual bootstrap flow
-
-Do this first.
-
-```bash
-npm run bootstrap
-```
-
-Flow:
-1. Browser opens in headed mode.
-2. You log in manually at `kvartplata.online`.
-3. If captcha appears, you solve it manually.
-4. Return to terminal and press Enter.
-5. Storage state is saved to `data/storage-state.json`.
-
-If login still looks required, bootstrap fails on purpose. No fake automation, no captcha bypassing.
-
-## Run the backend
+Start the app:
 
 ```bash
 npm run start
 ```
 
-Default URLs:
-- API: `http://localhost:3000`
-- Swagger UI: `http://localhost:3000/docs`
-- OpenAPI JSON: `http://localhost:3000/docs-json`
+The start script builds TypeScript and runs the compiled server from `dist/`.
 
-## Cron + manual scan flow
+## Manual session bootstrap
 
-### Scheduled scan
+If your kvartplata session is expired or missing, bootstrap it manually:
 
-The scraping module registers a Nest cron job using `SCRAPE_CRON`.
-
-Default:
-```env
-SCRAPE_CRON=0 9 * * *
-TZ=America/Los_Angeles
+```bash
+npm run bootstrap
 ```
 
-Meaning: once a day at 09:00 local time the backend will try to reuse the saved Playwright session and scan the kvartplata internal APIs.
+That opens Playwright, lets you log in manually, and saves session state to `data/storage-state.json`.
 
-### Manual scan over HTTP
+## Manual scan
+
+Trigger a scan through the API:
 
 ```bash
 curl -X POST http://localhost:3000/scraping/scan \
@@ -125,95 +96,65 @@ curl -X POST http://localhost:3000/scraping/scan \
   -d '{}'
 ```
 
-Optional filter example:
+Expected practical result right now:
+
+- it attempts the live session/internal API path
+- if that path still fails with the current `404`, it still imports the confirmed local receipts for account `7751294`
+- data is persisted into Postgres tables: `apartments`, `accruals`, `invoices`, `runs`
+
+## Useful endpoints
+
+### Swagger
+
+- `GET /docs`
+- `GET /docs-json`
+
+### Scraping
+
+- `POST /scraping/scan`
+- `GET /scraping/runs`
+
+### Data API
+
+- `GET /api/apartments`
+- `GET /api/apartments/:id`
+- `GET /api/accruals`
+- `GET /api/invoices`
+- `GET /api/runs`
+
+### Invoice lookup / download
+
+Get invoice metadata by apartment/account + period:
 
 ```bash
-curl -X POST http://localhost:3000/scraping/scan \
-  -H 'content-type: application/json' \
-  -d '{"organization":"Краснодар","trigger":"manual"}'
+curl 'http://localhost:3000/api/invoices/by-period?apartmentExternalId=7751294&period=202603'
 ```
 
-Behavior:
-- if DB already has apartments, the scraper uses the reusable DB query service to decide what to scan
-- if DB is empty, it first loads apartments from `/new-web/apartments`
-- then it queries accruals/invoice metadata through the discovered internal endpoints
-- if session expired, the run is marked `needs_login`
-
-## API examples
-
-### Query apartments
-
-List all apartments:
+Download/stream the PDF:
 
 ```bash
-curl 'http://localhost:3000/api/apartments'
+curl -OJ 'http://localhost:3000/api/invoices/by-period/download?apartmentExternalId=7751294&period=202603'
 ```
 
-By address:
+## Quick smoke test
+
+After `npm run start`, these should work:
 
 ```bash
-curl 'http://localhost:3000/api/apartments?address=Краснодар'
+curl http://localhost:3000/docs-json
+curl -X POST http://localhost:3000/scraping/scan -H 'content-type: application/json' -d '{}'
+curl 'http://localhost:3000/api/apartments?externalId=7751294'
+curl 'http://localhost:3000/api/invoices/by-period?apartmentExternalId=7751294&period=202603'
+curl -I 'http://localhost:3000/api/invoices/by-period/download?apartmentExternalId=7751294&period=202603'
 ```
 
-By organization:
+## Notes on data model
 
-```bash
-curl 'http://localhost:3000/api/apartments?organization=УК'
-```
+The current DB schema stores:
 
-One apartment with recent linked data:
+- `apartments` — apartment/account entities
+- `accruals` — period-level accrual snapshots
+- `invoices` — invoice metadata and local PDF path when available
+- `runs` — scan history / summary
 
-```bash
-curl 'http://localhost:3000/api/apartments/1'
-```
-
-### Query accruals
-
-```bash
-curl 'http://localhost:3000/api/accruals?apartmentExternalId=12345'
-curl 'http://localhost:3000/api/accruals?periodLabel=2026-02'
-```
-
-### Query invoices / receipt metadata
-
-```bash
-curl 'http://localhost:3000/api/invoices?apartmentExternalId=12345'
-curl 'http://localhost:3000/api/invoices?available=true'
-```
-
-### Recent scan history
-
-```bash
-curl 'http://localhost:3000/api/runs'
-curl 'http://localhost:3000/scraping/runs'
-```
-
-## Useful commands
-
-```bash
-npm run bootstrap
-npm run scan
-npm run start
-npm run build
-npm run typecheck
-npm run prisma:generate
-npm run db:init
-```
-
-## Limitations / sharp edges
-
-- This still depends on a valid manually created session. If the session expires, you must rerun `npm run bootstrap`.
-- The exact JSON shape of kvartplata internal endpoints can vary. The scraper currently uses pragmatic field extraction heuristics instead of pretending the API is stable and documented.
-- Invoice download remains best-effort and local-only.
-- There is no captcha automation by design.
-- No production deployment work was added. This is a local dev backend, as requested.
-
-## Recommendation
-
-The narrowest remaining risk is the exact response shape of the internal `kvartplata.online` endpoints for your account. Start with:
-
-1. `npm run bootstrap`
-2. `npm run start`
-3. `POST /scraping/scan`
-4. inspect Swagger + DB rows
-5. tighten field mapping in `src/modules/scraping/adapter.ts` only if your account returns a weird payload
+Legacy tables from the earlier partial version were preserved in Prisma compatibility mode so the local DB could be upgraded non-destructively.
