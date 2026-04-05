@@ -13,7 +13,8 @@
     "scan": "tsx src/scripts/scan.ts",
     "db:init": "prisma db push",
     "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate deploy"
+    "prisma:migrate": "prisma migrate deploy",
+    "deploy": "./scripts/deploy.sh"
   },
   "dependencies": {
     "@nestjs/common": "^11.1.6",
