@@ -15,7 +15,12 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate deploy",
     "playwright:install": "PLAYWRIGHT_BROWSERS_PATH=./.playwright-browsers npx playwright install chromium",
-    "deploy": "./scripts/deploy.sh"
+    "deploy": "./scripts/deploy.sh",
+    "docker:up": "docker compose up -d",
+    "docker:rebuild": "docker compose up --build app -d",
+    "docker:down": "docker compose down",
+    "docker:bootstrap": "docker exec -it kvartplata-watcher-app npm run bootstrap",
+    "docker:scan": "docker exec -it kvartplata-watcher-app npm run scan"
   },
   "dependencies": {
     "@nestjs/common": "^11.1.6",
@@ -27,7 +32,7 @@
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.2",
     "dotenv": "^16.6.1",
-    "playwright": "^1.54.2",
+    "playwright": "1.50.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2",
     "swagger-ui-express": "^5.0.1",

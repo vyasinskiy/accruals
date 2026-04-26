@@ -1,4 +1,3 @@
-version: '3.9'
 services:
   postgres:
     image: postgres:16-alpine
@@ -17,6 +16,42 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+
+  browserless:
+    image: browserless/chrome:1-chrome-stable
+    container_name: kvartplata-watcher-browser
+    restart: unless-stopped
+    ports:
+      - '3001:3000'
+    environment:
+      - MAX_CONCURRENT_SESSIONS=5
+      - SCREEN_WIDTH=1280
+      - SCREEN_HEIGHT=720
+      - CONNECTION_TIMEOUT=300000
+      - DEFAULT_STEALTH=true
+      - DEFAULT_IGNORE_HTTPS_ERRORS=true
+
+  app:
+    build: .
+    container_name: kvartplata-watcher-app
+    restart: unless-stopped
+    ports:
+      - '3000:3000'
+    env_file:
+      - .env
+    environment:
+      # Database connection
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/kvartplata_watcher?schema=public
+      DIRECT_URL: postgresql://postgres:postgres@postgres:5432/kvartplata_watcher?schema=public
+      # Теперь приложение всегда использует удаленный браузер
+      BROWSER_WS_ENDPOINT: ws://browserless:3000?stealth&--disable-blink-features=AutomationControlled
+    depends_on:
+      postgres:
+        condition: service_healthy
+      browserless:
+        condition: service_started
+    volumes:
+      - ./data:/app/data
 
 volumes:
   postgres_data:

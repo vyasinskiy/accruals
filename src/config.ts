@@ -22,6 +22,7 @@ const schema = z.object({
   DATA_DIR: z.string().default('./data'),
   STORAGE_STATE_PATH: z.string().default('./data/storage-state.json'),
   DATABASE_URL: z.string().min(1).default('postgresql://postgres:postgres@localhost:5432/kvartplata_watcher?schema=public'),
+  BROWSER_WS_ENDPOINT: z.string().optional(),
   HEADLESS: z.coerce.boolean().default(true),
   WAIT_AFTER_LOGIN_MS: z.coerce.number().default(3000),
   WAIT_AFTER_NAV_MS: z.coerce.number().default(1500),

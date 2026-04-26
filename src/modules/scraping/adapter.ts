@@ -7,9 +7,17 @@ import type { AccrualSnapshot, ApartmentSnapshot, InvoiceSnapshot, ScanResult } 
 export class KvartplataAdapter {
   async bootstrap(): Promise<void> {
     const { chromium } = await import('playwright');
-    const browser = await chromium.launch({ headless: false });
+    const browser = config.BROWSER_WS_ENDPOINT
+      ? await chromium.connectOverCDP(config.BROWSER_WS_ENDPOINT)
+      : await chromium.launch({ headless: false });
     const context = await browser.newContext({ acceptDownloads: true });
     const page = await context.newPage();
+
+    if (config.BROWSER_WS_ENDPOINT) {
+      console.log('--- REMOTE BROWSER DETECTED ---');
+      console.log('1. Open your browser and go to: http://localhost:3001');
+      console.log('2. You will see the remote browser screen there.');
+    }
 
     await page.goto(config.LOGIN_URL, { waitUntil: 'domcontentloaded' });
     console.log(`Open page: ${config.LOGIN_URL}`);
@@ -31,7 +39,9 @@ export class KvartplataAdapter {
     filters: { apartmentExternalIds?: string[]; log?: (message: string) => void } = {}
   ): Promise<ScanResult> {
     const { chromium } = await import('playwright');
-    const browser = await chromium.launch({ headless: config.HEADLESS });
+    const browser = config.BROWSER_WS_ENDPOINT
+      ? await chromium.connectOverCDP(config.BROWSER_WS_ENDPOINT)
+      : await chromium.launch({ headless: config.HEADLESS });
     const context = await browser.newContext({
       storageState: config.storageStatePath,
       acceptDownloads: config.DOWNLOAD_RECEIPTS
