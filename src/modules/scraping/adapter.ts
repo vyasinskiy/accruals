@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs';
 import type { BrowserContext, Page } from 'playwright';
 import { s3Storage } from '../../common/services/s3-storage.service';
 import { config } from '../../config';
@@ -39,13 +40,28 @@ export class KvartplataAdapter {
     filters: { apartmentExternalIds?: string[]; log?: (message: string) => void } = {}
   ): Promise<ScanResult> {
     const { chromium } = await import('playwright');
-    const browser = config.BROWSER_WS_ENDPOINT
-      ? await chromium.connectOverCDP(config.BROWSER_WS_ENDPOINT)
-      : await chromium.launch({ headless: config.HEADLESS });
-    const context = await browser.newContext({
-      storageState: config.storageStatePath,
-      acceptDownloads: config.DOWNLOAD_RECEIPTS
-    });
+    
+    let browser: any;
+    let context: BrowserContext;
+    
+    if (config.BROWSER_PROFILE_PATH && !config.BROWSER_WS_ENDPOINT) {
+      // Используем живой профиль визуального браузера
+      context = await chromium.launchPersistentContext(config.BROWSER_PROFILE_PATH, {
+        headless: config.HEADLESS,
+        acceptDownloads: config.DOWNLOAD_RECEIPTS
+      });
+      browser = null; // В режиме persistent context браузер управляется контекстом
+    } else {
+      browser = config.BROWSER_WS_ENDPOINT
+        ? await chromium.connectOverCDP(config.BROWSER_WS_ENDPOINT)
+        : await chromium.launch({ headless: config.HEADLESS });
+      
+      context = await browser.newContext({
+        storageState: fs.existsSync(config.storageStatePath) ? config.storageStatePath : undefined,
+        acceptDownloads: config.DOWNLOAD_RECEIPTS
+      });
+    }
+
     const page = await context.newPage();
     const log = filters.log ?? (() => undefined);
 
@@ -152,7 +168,11 @@ export class KvartplataAdapter {
           : `Scanned ${selectedApartmentRefs.length} apartment(s), ${accountsFound} account(s), ${accruals.length} accrual row(s), ${invoices.length} invoice row(s).`
       };
     } finally {
-      await browser.close();
+      if (browser) {
+        await browser.close();
+      } else if (context) {
+        await context.close();
+      }
     }
   }
 

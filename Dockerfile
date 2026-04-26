@@ -1,22 +1,20 @@
-# Используем легкий образ Node.js
-FROM node:22-slim
+# Используем актуальный образ Playwright для 2026 года
+FROM mcr.microsoft.com/playwright:v1.59.1-noble
 
 # Устанавливаем рабочую директорию
 WORKDIR /app
 
-# Копируем файлы манифестов
-COPY package*.json ./
-COPY prisma ./prisma/
+# Настраиваем системные переменные
+ENV IS_DOCKER=true
 
-# Устанавливаем только необходимые системные библиотеки (openssl для Prisma)
-RUN apt-get update && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
+# Копируем package.json (lock-файл не копируем, чтобы избежать конфликтов платформ)
+COPY package.json ./
 
 # Устанавливаем зависимости. 
-# PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 запрещает скачивание браузеров внутрь этого образа.
-ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
-RUN npm install
+# Фиксируем версию playwright и устанавливаем остальные пакеты.
+RUN npm install playwright@1.59.1 && npm install
 
-# Копируем остальные файлы проекта
+# Копируем остальные файлы
 COPY . .
 
 # Собираем TypeScript проект

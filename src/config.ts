@@ -23,6 +23,7 @@ const schema = z.object({
   STORAGE_STATE_PATH: z.string().default('./data/storage-state.json'),
   DATABASE_URL: z.string().min(1).default('postgresql://postgres:postgres@localhost:5432/kvartplata_watcher?schema=public'),
   BROWSER_WS_ENDPOINT: z.string().optional(),
+  BROWSER_PROFILE_PATH: z.string().optional(),
   HEADLESS: z.coerce.boolean().default(true),
   WAIT_AFTER_LOGIN_MS: z.coerce.number().default(3000),
   WAIT_AFTER_NAV_MS: z.coerce.number().default(1500),
@@ -46,6 +47,13 @@ const schema = z.object({
 });
 
 const raw = schema.parse(process.env);
+
+// Если мы внутри Docker, принудительно устанавливаем путь к браузерам, 
+// который используется в официальном образе Playwright (/ms-playwright)
+if (process.env.IS_DOCKER === 'true') {
+  process.env.PLAYWRIGHT_BROWSERS_PATH = '/ms-playwright';
+}
+
 const rootDir = process.cwd();
 const resolvePath = (value: string) => path.resolve(rootDir, value);
 
