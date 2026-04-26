@@ -1,131 +1,148 @@
 # kvartplata-watcher
 
-Локальный backend для `квартплата.онлайн` на **NestJS + Prisma + PostgreSQL + Playwright**.
+Local backend for `kvartplata.online` built with **NestJS + Prisma + PostgreSQL + Playwright**.
 
-Главная цель: по сохранённой ручной сессии пройти реальный pipeline:
+The main goal is to follow the real pipeline using a saved manual session:
 
-1. `GET /new-web/apartments` → получить все помещения
-2. `GET /new-web/apartments/{apartmentId}/info` → получить все `accounts[]` для помещения
-3. `GET /new-web/accruals?accountId=...` → получить начисления / периоды по каждому аккаунту
-4. `GET /new-web/Accruals/invoice?AccountId=...&PeriodId=YYYYMM` → скачать PDF квитанции
+1. `GET /new-web/apartments` → get all premises
+2. `GET /new-web/apartments/{apartmentId}/info` → get all `accounts[]` for the premise
+3. `GET /new-web/accruals?accountId=...` → get accruals/periods for each account
+4. `GET /new-web/Accruals/invoice?AccountId=...&PeriodId=YYYYMM` → download invoice PDFs
 
-## Важная модель данных
+## Important Data Model
 
-**У одного помещения может быть несколько аккаунтов.**
+**One apartment/premise can have multiple accounts.**
 
-То есть фактическая схема такая:
+The actual schema is as follows:
 
-- `apartmentId` = помещение
-- `accountId` = лицевой счёт / договор внутри помещения
-- квитанция ищется по связке:
+- `apartmentId` = the physical premise
+- `accountId` = the personal account / contract within the premise
+- An invoice is identified by the combination of:
   - `accountId`
   - `periodId` (`YYYYMM`)
 
-В текущей реализации приложение хранит в таблице `apartments` уже **account-level записи**:
+In the current implementation, the application stores **account-level records** in the `apartments` table:
 - `externalId` = `accountId`
-- `parentApartmentId` хранится в `rawJson`
-- адрес помещения и организация подтягиваются из apartment info
+- `parentApartmentId` is stored in `rawJson`
+- The premise address and organization are pulled from the apartment info
 
-Это сделано специально, чтобы не ломать существующий API и при этом нормально поддержать **несколько аккаунтов на одну квартиру**.
+This approach is intentional to maintain compatibility with the existing API while properly supporting **multiple accounts per apartment**.
 
-## Что уже работает
+## Current Features
 
-- сервер стартует через `npm run start`
-- Swagger доступен на `http://localhost:3000/docs`
-- ручной scan доступен через `POST /scraping/scan`
-- scan теперь идёт по цепочке:
+- Server starts via `npm run start`
+- Swagger UI available at `http://localhost:3000/docs`
+- Manual scan available via `POST /scraping/scan`
+- The scan follows the full chain:
   - apartments
   - apartment info
   - accounts
   - accruals
   - invoice
-- в терминал добавлены **человекочитаемые логи** во время scan
-- сохраняются данные по account-level сущностям, начислениям, квитанциям и запускам
-- подтверждённый локальный кейс с account `7751294` и PDF за `202601`, `202602`, `202603` остаётся рабочим
+- **Human-readable logs** added to the terminal during the scan
+- Data is stored for account-level entities, accruals, invoices, and runs
+- Confirmed local case with account `7751294` and PDFs for `202601`, `202602`, `202603` remains functional
 
-## Ограничения
+## Limitations
 
-- login/captcha **не автоматизируются** — только ручной bootstrap и reuse сохранённой сессии
-- upstream API может вести себя нестабильно, если сессия умерла или внутренние endpoint'ы поменялись
-- если live path временно не даёт данных, приложение всё ещё может опираться на уже подтверждённый локальный dataset в `downloads/receipts_2026_summary.json`
+- Login/captcha are **not automated** — only manual bootstrap and session reuse
+- Upstream API may be unstable if the session expires or internal endpoints change
+- If the live path is temporarily unavailable, the app can still rely on the confirmed local dataset in `downloads/receipts_2026_summary.json`
 
-## Путь проекта
-
-```bash
-cd /Users/torrnd/code/kvartplata-watcher
-```
-
-## Требования
+## Requirements
 
 - Node.js 24+
-- локальный Postgres
-- валидный `.env`
-- при live scraping: сохранённая Playwright session state
+- Docker (for running the database)
+- Valid `.env` file (create from `.env.example`)
+- For live scraping: a saved Playwright session state
 
-## Базовые команды
+## Quick Start (Local)
 
-### Установка
+### 1. Environment Setup
+
+```bash
+cp .env.example .env
+# Edit .env: specify DATABASE_URL, DIRECT_URL, and PLAYWRIGHT_BROWSERS_PATH
+```
+
+### 2. Start the Database
+
+The project uses PostgreSQL. The easiest way is to run it via Docker:
+
+```bash
+docker-compose up -d
+```
+
+### 3. Install Dependencies and Browser
 
 ```bash
 npm install
+# Install Chromium browser locally in the project folder (configured via .env)
+npm run playwright:install
 ```
 
-### Prisma client
-
-```bash
-npm run prisma:generate
-```
-
-### Инициализация схемы БД
+### 4. Initialize the Database
 
 ```bash
 npm run db:init
 ```
 
-### Запуск сервера
+### 5. Authorization (Bootstrap)
 
-```bash
-npm run start
-```
-
-После запуска:
-
-- Swagger: `http://localhost:3000/docs`
-- OpenAPI JSON: `http://localhost:3000/docs-json`
-
-## Bootstrap сессии
-
-Если сессия отсутствует или умерла:
+If the session is missing or expired, you need to log in manually:
 
 ```bash
 npm run bootstrap
 ```
 
-Что происходит:
-- открывается браузер
-- ты логинишься вручную
-- проходишь капчу вручную
-- сессия сохраняется в `data/storage-state.json`
+### 6. Start the Server or Scan
 
-## Как запустить scraping
+```bash
+npm run start:dev  # Start the development server
+# or
+npm run scan       # One-time accruals scan
+```
 
-Есть 2 пути.
+## Basic Commands
 
-### Вариант 1 — через CLI
+After startup:
+
+- Swagger: `http://localhost:3000/docs`
+- OpenAPI JSON: `http://localhost:3000/docs-json`
+
+## Session Bootstrap
+
+If the session is missing or has expired:
+
+```bash
+npm run bootstrap
+```
+
+What happens:
+- A browser window opens
+- You log in manually
+- You solve the captcha manually
+- The session is saved to `data/storage-state.json`
+
+## How to Run Scraping
+
+There are 2 ways.
+
+### Option 1 — via CLI
 
 ```bash
 npm run scan
 ```
 
-### Вариант 2 — через API
+### Option 2 — via API
 
-Сначала запускаешь сервер:
+First, start the server:
 
 ```bash
 npm run start
 ```
 
-Потом вызываешь scan:
+Then trigger the scan:
 
 ```bash
 curl -X POST http://localhost:3000/scraping/scan \
@@ -133,14 +150,14 @@ curl -X POST http://localhost:3000/scraping/scan \
   -d '{}'
 ```
 
-## Какие логи теперь идут в терминал
+## Scan Logs Examples
 
-Во время scan теперь печатается нормальный человекочитаемый прогресс. Примеры:
+During the scan, a clean progress log is printed to the terminal. Examples:
 
 - `Run started`
 - `Apartments discovered from /new-web/apartments: 5`
 - `Apartments selected for scan: 5`
-- `Apartment found: 301174 | г Краснодар, ул Старокубанская, д 129, пом. 554`
+- `Apartment found: 301174 | Krasnodar, Starokubanskaya st, 129, apt. 554`
 - `Accounts found for apartment 301174: 2`
 - `Scanning account 464653 for apartment 301174`
 - `Accrual periods found for account 464653: 12`
@@ -148,15 +165,15 @@ curl -X POST http://localhost:3000/scraping/scan \
 - `Invoice missing for account 464653, period 202604`
 - `Scan summary: apartments=5, accounts=7, accruals=40, invoices=40, downloaded=12, skipped=28`
 
-То есть теперь по логу видно:
-- сколько помещений найдено
-- сколько аккаунтов у каждого помещения
-- какие аккаунты реально сканируются
-- сколько периодов найдено
-- где PDF скачался, а где его нет
-- финальную сводку
+The log clearly shows:
+- How many premises were found
+- How many accounts each premise has
+- Which accounts are actually being scanned
+- How many periods were discovered
+- Where the PDF was downloaded vs. where it is missing
+- Final summary
 
-## Полезные endpoint'ы
+## Useful Endpoints
 
 ### Scraping
 
@@ -171,76 +188,76 @@ curl -X POST http://localhost:3000/scraping/scan \
 - `GET /api/invoices`
 - `GET /api/runs`
 
-### Квитанция по периоду
+### Fetch Invoice by Period
 
-Метаданные:
+Metadata:
 
 ```bash
 curl 'http://localhost:3000/api/invoices/by-period?apartmentExternalId=7751294&period=202603'
 ```
 
-Скачать PDF:
+Download PDF:
 
 ```bash
 curl -L 'http://localhost:3000/api/invoices/by-period/download?apartmentExternalId=7751294&period=202603' -o receipt_202603.pdf
 ```
 
-## Реальная цепочка internal API
+## Internal API Chain
 
-Вот тот flow, который теперь зашит в scraper:
+The scraper follows this specific flow:
 
-### 1. Получить помещения
+### 1. Get Premises
 
 ```http
 GET /new-web/apartments
 ```
 
-Пример ответа даёт `apartmentId`, `address` и прочие поля помещения.
+The response provides `apartmentId`, `address`, and other fields for the premise.
 
-### 2. Получить аккаунты конкретного помещения
+### 2. Get Accounts for a Specific Premise
 
 ```http
 GET /new-web/apartments/{apartmentId}/info
 ```
 
-Пример:
+Example:
 
 ```http
 GET /new-web/apartments/301174/info
 ```
 
-В ответе приходит массив:
+Response array:
 
 ```json
 {
   "accounts": [
-    { "id": 464653, "serviceName": "Коммунальные и жилищные услуги" },
-    { "id": 464746, "serviceName": "Коммунальные и жилищные услуги" }
+    { "id": 464653, "serviceName": "Utilities and housing services" },
+    { "id": 464746, "serviceName": "Utilities and housing services" }
   ]
 }
 ```
 
-### 3. Получить начисления по accountId
+### 3. Get Accruals by accountId
 
 ```http
 GET /new-web/accruals?accountId=464653
 ```
 
-Отсюда берутся:
-- периоды
-- суммы
-- признаки начислений / платежей
+This retrieves:
+- periods
+- amounts
+- accrual/payment status
 - `periodId`
 
-### 4. Скачать PDF квитанции
+### 4. Download Invoice PDF
 
 ```http
 GET /new-web/Accruals/invoice?AccountId=464653&PeriodId=202603
 ```
 
-## Smoke test
+## Smoke Test
 
-После запуска сервера можно быстро проверить так:
+Once the server is running, you can quickly verify it:
 
 ```bash
 curl http://localhost:3000/docs-json
@@ -250,17 +267,17 @@ curl 'http://localhost:3000/api/invoices'
 curl 'http://localhost:3000/api/invoices/by-period?apartmentExternalId=7751294&period=202603'
 ```
 
-## Что изменено по сравнению со старой логикой
+## Logic Improvements
 
-Старая логика пыталась идти слишком грубо и фактически предполагала почти `apartment -> accruals/invoice` напрямую.
+Previous logic was too simplified and assumed an almost direct `apartment -> accruals/invoice` mapping.
 
-Новая логика теперь правильная:
+The new logic is more accurate:
 
-- сначала берём **все помещения**
-- потом для каждого помещения берём **все аккаунты**
-- дальше скан идёт уже по **accountId**
-- invoice качается строго по:
+- First, fetch **all premises**
+- Then, for each premise, fetch **all associated accounts**
+- Proceed with the scan using the **accountId**
+- Download invoices strictly by:
   - `AccountId`
   - `PeriodId`
 
-Это и есть правильная модель для кейса, где у одного помещения несколько лицевых счетов.
+This correctly handles cases where a single apartment has multiple utility accounts.

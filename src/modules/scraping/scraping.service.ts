@@ -87,18 +87,7 @@ export class ScrapingService {
         }
       }
 
-      const fallback = loadConfirmedReceiptsSummary();
-      if (fallback.length) {
-        log(`Fallback receipts imported from local summary: ${fallback.length}`);
-        const fallbackApartment = toFallbackApartment(fallback[0]);
-        if (!apartments.some((item) => item.externalId === fallbackApartment.externalId)) {
-          apartments.push(fallbackApartment);
-        }
-        accruals.push(...fallback.map(toFallbackAccrual));
-        invoices.push(...fallback.map(toFallbackInvoice));
-      }
-
-      if (needsLogin && !fallback.length) {
+      if (needsLogin) {
         return await this.finalize(run.id, {
           startedAt: startedAt.toISOString(),
           finishedAt: new Date().toISOString(),
@@ -144,10 +133,8 @@ export class ScrapingService {
         startedAt: startedAt.toISOString(),
         finishedAt: new Date().toISOString(),
         trigger,
-        status: needsLogin || degraded ? 'warning' : 'success',
-        message: fallback.length
-          ? `${message} Confirmed local receipts were imported for account ${fallback[0].accountId}.`
-          : message,
+        status: degraded ? 'warning' : 'success',
+        message,
         apartmentsScanned: apartments.length,
         accrualsObserved: accruals.length,
         invoicesObserved: invoices.length,
@@ -300,64 +287,6 @@ export class ScrapingService {
 
     return summary;
   }
-}
-
-type ConfirmedReceiptRow = {
-  apartmentId: number;
-  accountId: number;
-  address: string;
-  periodId: number;
-  accruedAmount: number;
-  fine: number;
-  paidAmount: number;
-  initialBalance: number;
-  hasInvoice: boolean;
-  file: string | null;
-  status: string;
-};
-
-function loadConfirmedReceiptsSummary(): ConfirmedReceiptRow[] {
-  const summaryPath = path.resolve(config.rootDir, 'downloads/receipts_2026_summary.json');
-  if (!fs.existsSync(summaryPath)) return [];
-  return safeJsonParse<ConfirmedReceiptRow[]>(fs.readFileSync(summaryPath, 'utf8')) ?? [];
-}
-
-function toFallbackApartment(row: ConfirmedReceiptRow): ApartmentSnapshot {
-  return {
-    externalId: String(row.accountId),
-    address: row.address,
-    organization: 'Confirmed local kvartplata account',
-    accountNumber: String(row.accountId),
-    rawJson: JSON.stringify(row)
-  };
-}
-
-function toFallbackAccrual(row: ConfirmedReceiptRow): AccrualSnapshot {
-  const periodLabel = String(row.periodId);
-  return {
-    apartmentExternalId: String(row.accountId),
-    periodLabel,
-    amountText: String(row.accruedAmount),
-    statusText: row.status,
-    sourceUrl: undefined,
-    fingerprint: buildFingerprint('accrual', String(row.accountId), periodLabel, String(row.accruedAmount), row.status),
-    rawJson: JSON.stringify(row)
-  };
-}
-
-function toFallbackInvoice(row: ConfirmedReceiptRow): InvoiceSnapshot {
-  const periodLabel = String(row.periodId);
-  const localFilePath = row.file ? path.resolve(config.rootDir, row.file) : null;
-  return {
-    apartmentExternalId: String(row.accountId),
-    periodLabel,
-    invoiceUrl: undefined,
-    utilitiesUrl: undefined,
-    available: row.hasInvoice,
-    downloaded: Boolean(localFilePath && fs.existsSync(localFilePath)),
-    fingerprint: buildFingerprint('invoice', String(row.accountId), periodLabel, row.file ?? '', row.status),
-    rawJson: JSON.stringify({ ...row, localFilePath })
-  };
 }
 
 function buildFingerprint(...parts: string[]): string {

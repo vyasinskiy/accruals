@@ -4,3 +4,4 @@ dist/
 data/
 .npm-cache/
 playwright-report/
+.playwright-browsers/
