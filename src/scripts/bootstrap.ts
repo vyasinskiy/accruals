@@ -1,13 +1,12 @@
+import { NestFactory } from '@nestjs/core';
+import { AppModule } from '../app.module';
 import { ScrapingService } from '../modules/scraping/scraping.service';
-import { PrismaService } from '../common/prisma/prisma.service';
-import { ApartmentsService } from '../common/services/apartments.service';
 
 async function main(): Promise<void> {
-  const prisma = new PrismaService();
-  await prisma.$connect();
-  const service = new ScrapingService(prisma, new ApartmentsService(prisma));
+  const app = await NestFactory.createApplicationContext(AppModule);
+  const service = app.get(ScrapingService);
   await service.bootstrapSession();
-  await prisma.$disconnect();
+  await app.close();
   console.log('Saved Playwright storage state.');
 }
 

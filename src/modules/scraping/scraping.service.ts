@@ -1,7 +1,8 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
+import { ClientProxy } from '@nestjs/microservices';
 import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { ApartmentsService } from '../../common/services/apartments.service';
@@ -16,7 +17,8 @@ export class ScrapingService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly apartmentsService: ApartmentsService
+    private readonly apartmentsService: ApartmentsService,
+    @Inject('NOTIFICATIONS_SERVICE') private readonly client: ClientProxy
   ) {}
 
   async bootstrapSession(): Promise<void> {
@@ -25,13 +27,17 @@ export class ScrapingService {
 
   @Cron(config.SCRAPE_CRON, { timeZone: config.TZ })
   async runCronScan(): Promise<ScanSummary> {
+    console.log(`[cron] Starting scheduled scan (schedule: ${config.SCRAPE_CRON})`);
     return this.scan({ trigger: 'cron' });
   }
 
   async scan(input: ManualScanDto = {}): Promise<ScanSummary> {
     const startedAt = new Date();
     const trigger = input.trigger ?? 'manual';
-    const log = (message: string) => console.log(`[scan:${trigger}] ${message}`);
+    const log = (message: string) => {
+      const timestamp = new Date().toLocaleString('ru-RU', { timeZone: config.TZ });
+      console.log(`[${timestamp}] [scan:${trigger}] ${message}`);
+    };
     const run = await this.prisma.run.create({
       data: {
         startedAt,
@@ -117,17 +123,27 @@ export class ScrapingService {
       }
       log(`Apartments/accounts upserted: total=${apartments.length}, new=${newApartments}`);
 
-      let newAccruals = 0;
+      let newAccrualsCount = 0;
       for (const accrual of accruals) {
-        if (await this.upsertAccrual(accrual, apartmentMap)) newAccruals += 1;
+        if (await this.upsertAccrual(accrual, apartmentMap)) {
+          newAccrualsCount += 1;
+          this.client.emit('notify_accrual', {
+            message: `🔔 <b>Новое начисление!</b>\n\nПериод: ${accrual.periodLabel}\nСумма: ${accrual.amountText}\nСтатус: ${accrual.statusText}\nАдрес: ${apartments.find(a => a.externalId === accrual.apartmentExternalId)?.address || 'неизвестен'}`
+          });
+        }
       }
-      log(`Accruals upserted: total=${accruals.length}, new=${newAccruals}`);
+      log(`Accruals upserted: total=${accruals.length}, new=${newAccrualsCount}`);
 
-      let newInvoices = 0;
+      let newInvoicesCount = 0;
       for (const invoice of invoices) {
-        if (await this.upsertInvoice(invoice, apartmentMap)) newInvoices += 1;
+        if (await this.upsertInvoice(invoice, apartmentMap)) {
+          newInvoicesCount += 1;
+          this.client.emit('notify_accrual', {
+            message: `📄 <b>Доступна новая квитанция!</b>\n\nПериод: ${invoice.periodLabel}\nАдрес: ${apartments.find(a => a.externalId === invoice.apartmentExternalId)?.address || 'неизвестен'}`
+          });
+        }
       }
-      log(`Invoices upserted: total=${invoices.length}, new=${newInvoices}`);
+      log(`Invoices upserted: total=${invoices.length}, new=${newInvoicesCount}`);
 
       const summary = await this.finalize(run.id, {
         startedAt: startedAt.toISOString(),
@@ -139,8 +155,8 @@ export class ScrapingService {
         accrualsObserved: accruals.length,
         invoicesObserved: invoices.length,
         newApartments,
-        newAccruals,
-        newInvoices,
+        newAccruals: newAccrualsCount,
+        newInvoices: newInvoicesCount,
         needsLogin
       });
 

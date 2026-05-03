@@ -10,7 +10,7 @@ const defaultApiBaseUrl = 'https://xn--new--o5df.xn--80aaaf3bi1ahsd.xn--80asehdb
 
 const schema = z.object({
   NODE_ENV: z.string().default('development'),
-  PORT: z.coerce.number().int().min(1).max(65535).default(3000),
+  PORT: z.coerce.number().int().min(1).max(65535).default(4500),
   APP_URL: z.string().url().default(defaultWebUrl),
   LOGIN_URL: z.string().url().default(defaultWebUrl),
   ACCOUNT_PAGE_URL: z.string().optional().default(`${defaultWebUrl}new-web/apartments`),
@@ -39,11 +39,10 @@ const schema = z.object({
   S3_SECRET_ACCESS_KEY: z.string().default(''),
   S3_PREFIX: z.string().default(''),
   S3_SIGNED_URL_TTL: z.coerce.number().int().positive().default(3600),
-  TELEGRAM_BOT_TOKEN: z.string().optional(),
-  TELEGRAM_CHAT_ID: z.string().optional(),
-  TELEGRAM_SILENT: z.coerce.boolean().default(false),
-  SCRAPE_CRON: z.string().default('0 9 * * *'),
-  TZ: z.string().default('America/Los_Angeles')
+  RABBITMQ_URL: z.string().default('amqp://localhost:5672'),
+  QUEUE_NAME: z.string().default('accruals_notifications'),
+  SCRAPE_CRON: z.string().default('0 0,3,6,9,12,15,18,21 * * *'),
+  TZ: z.string().default('Europe/Madrid')
 });
 
 const raw = schema.parse(process.env);
