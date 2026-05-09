@@ -49,6 +49,9 @@ services:
 
   watcher:
     image: accruals-watcher:latest
+    build:
+      context: ${WATCHER_PATH:-../accruals-watcher}
+      dockerfile: Dockerfile
     container_name: accruals-watcher
     restart: unless-stopped
     ports:
@@ -56,32 +59,56 @@ services:
     env_file:
       - ${WATCHER_PATH:-../accruals-watcher}/.env
     environment:
-      # ВАЖНО: Эти переменные перекроют те, что в .env файле
-      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-kvartplata_watcher}?schema=public
       RABBITMQ_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASS:-guest}@rabbitmq:5672
       BROWSER_WS_ENDPOINT: ""
       BROWSER_PROFILE_PATH: "/app/data/browser-profile/.config/chromium"
       IS_DOCKER: "true"
     depends_on:
-      postgres:
-        condition: service_healthy
       rabbitmq:
+        condition: service_started
+      accountant:
         condition: service_started
     volumes:
       - ${WATCHER_PATH:-../accruals-watcher}/data:/app/data
     networks:
       - accruals-network
 
+  accountant:
+    image: accruals-accountant:latest
+    build:
+      context: ${ACCOUNTANT_PATH:-../accruals-accountant}
+      dockerfile: Dockerfile
+    container_name: accruals-accountant
+    restart: unless-stopped
+    env_file:
+      - ${ACCOUNTANT_PATH:-../accruals-accountant}/.env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-kvartplata_watcher}?schema=public
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASS:-guest}@rabbitmq:5672
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_started
+    networks:
+      - accruals-network
+
   bot:
     image: accruals-bot:latest
+    build:
+      context: ${BOT_PATH:-../accruals-bot}
+      dockerfile: Dockerfile
     container_name: accruals-bot
     restart: unless-stopped
     env_file:
       - ${BOT_PATH:-../accruals-bot}/.env
     environment:
       RABBITMQ_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASS:-guest}@rabbitmq:5672
+      ADMIN_CHAT_ID: ${ADMIN_CHAT_ID}
     depends_on:
       rabbitmq:
+        condition: service_started
+      accountant:
         condition: service_started
     networks:
       - accruals-network
