@@ -3,14 +3,11 @@ import { Telegraf } from 'telegraf';
 import { config } from '../../common/config/config';
 
 @Injectable()
-export class BotService implements OnModuleInit {
+export class BotNotificationService implements OnModuleInit {
   private bot: Telegraf;
 
   onModuleInit() {
     this.bot = new Telegraf(config.TELEGRAM_BOT_TOKEN);
-    this.bot.launch().catch(err => {
-      console.error('Failed to launch Telegram bot', err);
-    });
   }
 
   async sendNotification(message: string, chatId?: string) {
@@ -20,5 +17,16 @@ export class BotService implements OnModuleInit {
       return;
     }
     await this.bot.telegram.sendMessage(targetChatId, message, { parse_mode: 'HTML' });
+  }
+
+  async sendAdminNotification(message: string, extra?: any) {
+    if (!config.ADMIN_CHAT_ID) {
+      console.error('No ADMIN_CHAT_ID provided');
+      return;
+    }
+    await this.bot.telegram.sendMessage(config.ADMIN_CHAT_ID, message, {
+      parse_mode: 'HTML',
+      ...extra,
+    });
   }
 }
