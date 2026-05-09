@@ -1,4 +1,4 @@
-# Используем актуальный образ Playwright
+# Use the latest Playwright image
 FROM mcr.microsoft.com/playwright:v1.59.1-noble
 
 WORKDIR /app
@@ -7,17 +7,18 @@ ENV IS_DOCKER=true
 
 COPY package.json ./
 
-# Устанавливаем зависимости
+# Install dependencies
 RUN npm install playwright@1.59.1 && npm install
 
 COPY . .
 
-# Собираем TypeScript проект
-RUN npm run build
-
-# Генерируем клиент Prisma (это не требует подключения к БД)
+# Generate Prisma Client (does not require DB connection)
+# Must be BEFORE npm run build for tsc to see correct types
 RUN npx prisma generate
 
-# Запускаем только приложение. 
-# БД пушим через deploy.sh или вручную.
+# Build TypeScript project
+RUN npm run build
+
+# Start the application.
+# DB is pushed via deploy.sh or manually.
 CMD ["npm", "run", "start"]

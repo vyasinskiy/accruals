@@ -1,4 +1,4 @@
-давnode_modules
+node_modules
 .playwright-browsers
 dist
 .env

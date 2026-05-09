@@ -32,6 +32,7 @@ export interface InvoiceSnapshot {
   available: boolean;
   downloaded: boolean;
   fingerprint: string;
+  localFilePath?: string;
   rawJson?: string;
 }
 

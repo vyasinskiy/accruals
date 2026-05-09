@@ -41,14 +41,16 @@ const schema = z.object({
   S3_SIGNED_URL_TTL: z.coerce.number().int().positive().default(3600),
   RABBITMQ_URL: z.string().default('amqp://localhost:5672'),
   QUEUE_NAME: z.string().default('accruals_notifications'),
+  ACCOUNTANT_QUEUE: z.string().default('accountant_queue'),
+  ACCOUNTANT_API_URL: z.string().url().default('http://localhost:3005'),
   SCRAPE_CRON: z.string().default('0 0,3,6,9,12,15,18,21 * * *'),
   TZ: z.string().default('Europe/Madrid')
 });
 
 const raw = schema.parse(process.env);
 
-// Если мы внутри Docker, принудительно устанавливаем путь к браузерам, 
-// который используется в официальном образе Playwright (/ms-playwright)
+// If we are inside Docker, force set the path to browsers
+// used in the official Playwright image (/ms-playwright)
 if (process.env.IS_DOCKER === 'true') {
   process.env.PLAYWRIGHT_BROWSERS_PATH = '/ms-playwright';
 }

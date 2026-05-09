@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ClientsModule, Transport } from '@nestjs/microservices';
+import { AccountantClientService } from './services/accountant-client.service';
 import { PrismaModule } from './prisma/prisma.module';
-import { ApartmentsService } from './services/apartments.service';
 import { config } from '../config';
 
 @Module({
@@ -19,9 +19,20 @@ import { config } from '../config';
           },
         },
       },
+      {
+        name: 'ACCOUNTANT_SERVICE',
+        transport: Transport.RMQ,
+        options: {
+          urls: [config.RABBITMQ_URL],
+          queue: config.ACCOUNTANT_QUEUE,
+          queueOptions: {
+            durable: true,
+          },
+        },
+      },
     ]),
   ],
-  providers: [ApartmentsService],
-  exports: [PrismaModule, ApartmentsService, ClientsModule],
+  providers: [AccountantClientService],
+  exports: [AccountantClientService, ClientsModule, PrismaModule],
 })
 export class CommonModule {}

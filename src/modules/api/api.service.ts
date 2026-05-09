@@ -1,79 +1,32 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { AccountantClientService } from '../../common/services/accountant-client.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
-import { ApartmentsService } from '../../common/services/apartments.service';
 import { s3Storage } from '../../common/services/s3-storage.service';
 import { config } from '../../config';
-import { QueryAccrualsDto } from './dto/query-accruals.dto';
-import { QueryApartmentsDto } from './dto/query-apartments.dto';
-import { QueryInvoicesDto } from './dto/query-invoices.dto';
 
 @Injectable()
 export class ApiService {
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly apartmentsService: ApartmentsService
+    private readonly accountantClient: AccountantClientService,
+    private readonly prisma: PrismaService
   ) {}
-
-  getApartments(query: QueryApartmentsDto) {
-    return this.apartmentsService.findMany(query);
-  }
-
-  getApartment(id: number) {
-    return this.prisma.apartment.findUnique({
-      where: { id },
-      include: {
-        accruals: { orderBy: [{ periodLabel: 'desc' }, { id: 'desc' }], take: 20 },
-        invoices: { orderBy: [{ periodLabel: 'desc' }, { id: 'desc' }], take: 20 }
-      }
-    });
-  }
-
-  getAccruals(query: QueryAccrualsDto) {
-    const where: Prisma.AccrualWhereInput = {
-      ...(query.apartmentId ? { apartmentId: query.apartmentId } : {}),
-      ...(query.apartmentExternalId ? { apartmentExternalId: query.apartmentExternalId } : {}),
-      ...(query.periodLabel ? { periodLabel: { contains: query.periodLabel, mode: 'insensitive' } } : {})
-    };
-
-    return this.prisma.accrual.findMany({
-      where,
-      include: { apartment: true },
-      orderBy: [{ periodLabel: 'desc' }, { id: 'desc' }]
-    });
-  }
-
-  getInvoices(query: QueryInvoicesDto) {
-    const where: Prisma.InvoiceWhereInput = {
-      ...(query.apartmentId ? { apartmentId: query.apartmentId } : {}),
-      ...(query.apartmentExternalId ? { apartmentExternalId: query.apartmentExternalId } : {}),
-      ...(query.periodLabel ? { periodLabel: { contains: query.periodLabel, mode: 'insensitive' } } : {}),
-      ...(typeof query.available === 'boolean' ? { available: query.available } : {})
-    };
-
-    return this.prisma.invoice.findMany({
-      where,
-      include: { apartment: true },
-      orderBy: [{ periodLabel: 'desc' }, { id: 'desc' }]
-    });
-  }
 
   async getInvoiceByApartmentAndPeriod(apartmentExternalId: string, period: string) {
     const normalizedPeriod = normalizePeriod(period);
-    const apartment = await this.prisma.apartment.findFirst({ where: { externalId: apartmentExternalId } });
+    const apartment = await this.accountantClient.getApartmentByExternalId(apartmentExternalId);
     if (!apartment) {
       throw new NotFoundException(`Apartment/account ${apartmentExternalId} not found`);
     }
 
-    const invoice = await this.prisma.invoice.findFirst({
-      where: {
-        apartmentExternalId,
-        OR: [{ periodLabel: normalizedPeriod }, { periodLabel: period }]
-      },
-      include: { apartment: true }
+    const invoices = await this.accountantClient.findInvoices({
+      apartmentExternalId,
     });
+
+    const invoice = invoices.find((inv: any) => 
+      inv.periodLabel === normalizedPeriod || inv.periodLabel === period
+    );
 
     if (!invoice) {
       throw new NotFoundException(`Invoice for ${apartmentExternalId} and period ${period} not found`);
@@ -102,7 +55,10 @@ export class ApiService {
   }
 
   getRuns() {
-    return this.prisma.run.findMany({ orderBy: { id: 'desc' }, take: 20 });
+    return this.prisma.run.findMany({
+      orderBy: { startedAt: 'desc' },
+      take: 20
+    });
   }
 }
 

@@ -1,7 +1,6 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import type { BrowserContext, Page } from 'playwright';
-import { s3Storage } from '../../common/services/s3-storage.service';
 import { config } from '../../config';
 import type { AccrualSnapshot, ApartmentSnapshot, InvoiceSnapshot, ScanResult } from '../../types';
 
@@ -45,12 +44,11 @@ export class KvartplataAdapter {
     let context: BrowserContext;
     
     if (config.BROWSER_PROFILE_PATH && !config.BROWSER_WS_ENDPOINT) {
-      // Используем живой профиль визуального браузера
       context = await chromium.launchPersistentContext(config.BROWSER_PROFILE_PATH, {
         headless: config.HEADLESS,
-        acceptDownloads: config.DOWNLOAD_RECEIPTS
+        acceptDownloads: true
       });
-      browser = null; // В режиме persistent context браузер управляется контекстом
+      browser = null;
     } else {
       browser = config.BROWSER_WS_ENDPOINT
         ? await chromium.connectOverCDP(config.BROWSER_WS_ENDPOINT)
@@ -58,7 +56,7 @@ export class KvartplataAdapter {
       
       context = await browser.newContext({
         storageState: fs.existsSync(config.storageStatePath) ? config.storageStatePath : undefined,
-        acceptDownloads: config.DOWNLOAD_RECEIPTS
+        acceptDownloads: true
       });
     }
 
@@ -107,21 +105,6 @@ export class KvartplataAdapter {
       const accruals: AccrualSnapshot[] = [];
       const invoices: InvoiceSnapshot[] = [];
       let accountsFound = 0;
-      let invoicesDownloaded = 0;
-      let invoicesSkipped = 0;
-      const existingS3Keys = new Set<string>();
-
-      if (config.S3_ENABLED && s3Storage.isEnabled()) {
-        try {
-          const prefetchedKeys = await s3Storage.listKeys();
-          for (const key of prefetchedKeys) existingS3Keys.add(key);
-          log(`Prefetched ${existingS3Keys.size} existing invoice file(s) from S3`);
-        } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          warnings.push(`S3 prefetch failed: ${errorMessage}`);
-          log(`S3 prefetch failed: ${errorMessage}`);
-        }
-      }
 
       for (const apartment of selectedApartmentRefs) {
         try {
@@ -140,10 +123,30 @@ export class KvartplataAdapter {
             accruals.push(...accountAccruals);
             log(`Accrual periods found for account ${account.externalId}: ${accountAccruals.length}`);
 
-            const accountInvoices = await this.extractInvoices(page, account, accountAccruals, existingS3Keys, log);
-            invoices.push(...accountInvoices.rows);
-            invoicesDownloaded += accountInvoices.downloaded;
-            invoicesSkipped += accountInvoices.skipped;
+            // Extract invoice metadata (links), don't download here
+            for (const accrual of accountAccruals) {
+                const invoiceUrl = new URL(config.endpoints.invoice, config.API_BASE_URL);
+                invoiceUrl.searchParams.set('AccountId', account.externalId);
+                invoiceUrl.searchParams.set('PeriodId', accrual.periodId ?? accrual.periodLabel);
+                
+                invoices.push({
+                    apartmentExternalId: account.externalId,
+                    parentApartmentId: account.parentApartmentId,
+                    periodLabel: accrual.periodLabel,
+                    periodId: accrual.periodId,
+                    invoiceUrl: invoiceUrl.toString(),
+                    utilitiesUrl: undefined,
+                    available: true,
+                    downloaded: false,
+                    fingerprint: buildFingerprint('invoice', account.externalId, accrual.periodId ?? accrual.periodLabel, invoiceUrl.toString()),
+                    rawJson: JSON.stringify({
+                        accountId: account.externalId,
+                        parentApartmentId: account.parentApartmentId,
+                        periodId: accrual.periodId ?? accrual.periodLabel,
+                        invoiceUrl: invoiceUrl.toString()
+                    })
+                });
+            }
           }
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : String(error);
@@ -153,19 +156,15 @@ export class KvartplataAdapter {
       }
 
       const selectedAccounts = dedupe(apartmentSnapshots, (item) => item.externalId);
-      log(
-        `Scan summary: apartments=${selectedApartmentRefs.length}, accounts=${selectedAccounts.length}, accruals=${accruals.length}, invoices=${invoices.length}, downloaded=${invoicesDownloaded}, skipped=${invoicesSkipped}`
-      );
-
       return {
         apartments: selectedAccounts,
         accruals,
-        invoices,
+        invoices: dedupe(invoices, (item) => item.fingerprint),
         needsLogin: false,
         degraded: warnings.length > 0,
         message: warnings.length
-          ? `Scanned ${selectedApartmentRefs.length} apartment(s), ${accountsFound} account(s), ${accruals.length} accrual row(s), ${invoices.length} invoice row(s). Warnings: ${warnings.join(' ')}`
-          : `Scanned ${selectedApartmentRefs.length} apartment(s), ${accountsFound} account(s), ${accruals.length} accrual row(s), ${invoices.length} invoice row(s).`
+          ? `Scanned ${selectedApartmentRefs.length} apartment(s), ${accountsFound} account(s). Warnings: ${warnings.join(' ')}`
+          : `Scanned ${selectedApartmentRefs.length} apartment(s), ${accountsFound} account(s).`
       };
     } finally {
       if (browser) {
@@ -176,57 +175,24 @@ export class KvartplataAdapter {
     }
   }
 
-  private async extractInvoices(
-    page: Page,
-    account: ApartmentSnapshot,
-    accruals: AccrualSnapshot[],
-    existingS3Keys: Set<string>,
-    log: (message: string) => void
-  ): Promise<{ rows: InvoiceSnapshot[]; downloaded: number; skipped: number }> {
-    const results: InvoiceSnapshot[] = [];
-    let downloaded = 0;
-    let skipped = 0;
-
-    for (const accrual of accruals) {
-      const invoiceAttempt = await this.tryFetchInvoice(
-        page.context(),
-        account.externalId,
-        accrual.periodId ?? accrual.periodLabel,
-        existingS3Keys
-      );
-
-      if (invoiceAttempt.downloaded) downloaded += 1;
-      else skipped += 1;
-
-      log(
-        invoiceAttempt.available
-          ? `Invoice ${invoiceAttempt.downloaded ? 'downloaded' : 'available but skipped'} for account ${account.externalId}, period ${accrual.periodLabel}`
-          : `Invoice missing for account ${account.externalId}, period ${accrual.periodLabel}`
-      );
-
-      results.push({
-        apartmentExternalId: account.externalId,
-        parentApartmentId: account.parentApartmentId,
-        periodLabel: accrual.periodLabel,
-        periodId: accrual.periodId,
-        invoiceUrl: invoiceAttempt.invoiceUrl,
-        utilitiesUrl: undefined,
-        available: invoiceAttempt.available,
-        downloaded: invoiceAttempt.downloaded,
-        fingerprint: buildFingerprint('invoice', account.externalId, accrual.periodId ?? accrual.periodLabel, invoiceAttempt.invoiceUrl ?? '', invoiceAttempt.storageKey ?? ''),
-        rawJson: JSON.stringify({
-          accountId: account.externalId,
-          parentApartmentId: account.parentApartmentId,
-          periodId: accrual.periodId ?? accrual.periodLabel,
-          invoiceUrl: invoiceAttempt.invoiceUrl,
-          localFilePath: invoiceAttempt.storageKey,
-          s3Key: invoiceAttempt.storageKey,
-          storageProvider: invoiceAttempt.storageKey ? 's3' : undefined
-        })
+  async downloadInvoice(url: string): Promise<Buffer> {
+    const { chromium } = await import('playwright');
+    const browser = await chromium.launch({ headless: config.HEADLESS });
+    const context = await browser.newContext({
+      storageState: fs.existsSync(config.storageStatePath) ? config.storageStatePath : undefined
+    });
+    const page = await context.newPage();
+    try {
+      const response = await page.request.get(url, {
+        headers: { accept: 'application/pdf, application/octet-stream, */*' }
       });
+      if (!response.ok()) {
+        throw new Error(`Failed to download invoice: ${response.status()}`);
+      }
+      return await response.body();
+    } finally {
+      await browser.close();
     }
-
-    return { rows: dedupe(results, (item) => item.fingerprint), downloaded, skipped };
   }
 
   private async fetchJson(
@@ -261,50 +227,6 @@ export class KvartplataAdapter {
     const hasReadySignal = config.accountReadyTextList.some((keyword) => bodyText.includes(keyword.toLowerCase()));
     if (hasReadySignal) return false;
     return config.sessionRequiredKeywords.some((keyword) => bodyText.includes(keyword));
-  }
-
-  private async tryFetchInvoice(
-    context: BrowserContext,
-    accountId: string,
-    periodId: string,
-    existingS3Keys: Set<string>
-  ): Promise<{ available: boolean; downloaded: boolean; invoiceUrl: string; storageKey?: string }> {
-    const shouldStoreReceipt = config.DOWNLOAD_RECEIPTS || s3Storage.isEnabled();
-    const invoiceUrl = new URL(config.endpoints.invoice, config.API_BASE_URL);
-    invoiceUrl.searchParams.set('AccountId', accountId);
-    invoiceUrl.searchParams.set('PeriodId', periodId);
-    const storageKey = s3Storage.buildInvoiceKey(accountId, periodId);
-
-    try {
-      if (shouldStoreReceipt && s3Storage.isEnabled() && existingS3Keys.has(storageKey)) {
-        return { available: true, downloaded: false, invoiceUrl: invoiceUrl.toString(), storageKey };
-      }
-
-      const page = await context.newPage();
-      const response = await page.request.get(invoiceUrl.toString(), {
-        headers: { accept: 'application/pdf, application/octet-stream, */*' }
-      });
-      if (!response.ok()) {
-        await page.close();
-        return { available: false, downloaded: false, invoiceUrl: invoiceUrl.toString() };
-      }
-      const buffer = await response.body();
-      await page.close();
-
-      if (!shouldStoreReceipt) {
-        return { available: true, downloaded: false, invoiceUrl: invoiceUrl.toString() };
-      }
-
-      if (!s3Storage.isEnabled()) {
-        throw new Error('S3 storage is required when DOWNLOAD_RECEIPTS=true');
-      }
-
-      await s3Storage.uploadPdf(storageKey, buffer);
-      existingS3Keys.add(storageKey);
-      return { available: true, downloaded: true, invoiceUrl: invoiceUrl.toString(), storageKey };
-    } catch {
-      return { available: false, downloaded: false, invoiceUrl: invoiceUrl.toString() };
-    }
   }
 }
 
@@ -471,10 +393,6 @@ function dedupe<T>(items: T[], getKey: (item: T) => string): T[] {
   const map = new Map<string, T>();
   for (const item of items) map.set(getKey(item), item);
   return [...map.values()];
-}
-
-function slug(value: string): string {
-  return value.toLowerCase().replace(/[^a-zа-яё0-9]+/gi, '-').replace(/^-+|-+$/g, '');
 }
 
 function formatApartment(apartment: ApartmentSnapshot): string {
