@@ -236,7 +236,7 @@ async function waitForEnter(): Promise<void> {
   });
 }
 
-function extractApartments(payload: unknown): ApartmentSnapshot[] {
+export function extractApartments(payload: unknown): ApartmentSnapshot[] {
   const rows = collectObjects(payload);
   const results: ApartmentSnapshot[] = [];
 
@@ -255,7 +255,7 @@ function extractApartments(payload: unknown): ApartmentSnapshot[] {
   return dedupe(results, (item) => item.externalId);
 }
 
-function extractAccounts(apartment: ApartmentSnapshot, payload: unknown): AccountSnapshot[] {
+export function extractAccounts(apartment: ApartmentSnapshot, payload: unknown): AccountSnapshot[] {
   const accounts = findObjectsAtKeys(payload, ['accounts', 'Accounts']);
   const rows = accounts.length ? accounts : collectObjects(payload);
   const extracted: AccountSnapshot[] = [];
@@ -275,14 +275,14 @@ function extractAccounts(apartment: ApartmentSnapshot, payload: unknown): Accoun
   return dedupe(extracted, (item) => item.externalId);
 }
 
-function extractAccruals(account: AccountSnapshot, payload: unknown): AccrualSnapshot[] {
+export function extractAccruals(account: AccountSnapshot, payload: unknown): AccrualSnapshot[] {
   const rows = findObjectsAtKeys(payload, ['accruals', 'Accruals']);
   const sourceRows = rows.length ? rows : collectObjects(payload);
 
   return dedupe(sourceRows
     .map((row) => {
       const periodId = pickString(row, ['periodId', 'PeriodId', 'period', 'Period', 'month', 'Month']);
-      const periodLabel = periodId ?? pickString(row, ['name', 'Name', 'caption', 'Caption']) ?? 'unknown';
+      const periodLabel = pickString(row, ['name', 'Name', 'caption', 'Caption', 'periodLabel', 'PeriodLabel']) ?? periodId ?? 'unknown';
 
       const initialBalance = pickString(row, ['initialBalance', 'InitialBalance']);
       const accruedAmount = pickString(row, ['accruedAmount', 'AccruedAmount', 'amount', 'Amount', 'sum', 'Sum', 'value']);
