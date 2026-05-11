@@ -1,0 +1,96 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model Apartment {
+  id            Int       @id @default(autoincrement())
+  externalId    String    @unique @map("external_id")
+  address       String?
+  organization  String?
+  rawJson       String?   @map("raw_json")
+  firstSeenAt   DateTime  @map("first_seen_at")
+  lastSeenAt    DateTime  @map("last_seen_at")
+  accounts      Account[]
+
+  @@index([address], map: "idx_apartments_address")
+  @@index([organization], map: "idx_apartments_organization")
+  @@map("apartments")
+}
+
+model Account {
+  id            Int       @id @default(autoincrement())
+  externalId    String    @unique @map("external_id")
+  apartmentId   Int       @map("apartment_id")
+  accountNumber String?   @map("account_number")
+  accountLabel  String?   @map("account_label")
+  rawJson       String?   @map("raw_json")
+  firstSeenAt   DateTime  @map("first_seen_at")
+  lastSeenAt    DateTime  @map("last_seen_at")
+  apartment     Apartment @relation(fields: [apartmentId], references: [id], onDelete: Cascade)
+  accruals      Accrual[]
+  invoices      Invoice[]
+
+  @@index([accountNumber], map: "idx_accounts_number")
+  @@map("accounts")
+}
+
+model Accrual {
+  id                Int       @id @default(autoincrement())
+  accountId         Int       @map("account_id")
+  accountExternalId String    @map("account_external_id")
+  periodId          String    @map("period_id")
+  periodLabel       String    @map("period_label")
+  amountText        String?   @map("amount_text")
+  statusText        String?   @map("status_text")
+  sourceUrl         String?   @map("source_url")
+  rawJson           String?   @map("raw_json")
+  firstSeenAt       DateTime  @map("first_seen_at")
+  lastSeenAt    DateTime  @map("last_seen_at")
+  account           Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([accountExternalId, periodId])
+  @@index([accountId, periodLabel], map: "idx_accruals_account_period")
+  @@map("accruals")
+}
+
+model Invoice {
+  id                Int       @id @default(autoincrement())
+  accountId         Int       @map("account_id")
+  accountExternalId String    @map("account_external_id")
+  periodId          String    @map("period_id")
+  periodLabel       String    @map("period_label")
+  invoiceUrl        String?   @map("invoice_url")
+  utilitiesUrl      String?   @map("utilities_url")
+  localFilePath     String?   @map("local_file_path")
+  available         Boolean   @default(false)
+  uploadedToS3      Boolean   @default(false) @map("uploaded_to_s3")
+  rawJson           String?   @map("raw_json")
+  firstSeenAt       DateTime  @map("first_seen_at")
+  lastSeenAt    DateTime  @map("last_seen_at")
+  account           Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([accountExternalId, periodId])
+  @@index([accountId, periodLabel], map: "idx_invoices_account_period")
+  @@map("invoices")
+}
+
+model Payment {
+  id               Int      @id @default(autoincrement())
+  userId           BigInt   @map("user_id")
+  userName         String?  @map("user_name")
+  amount           Decimal  @db.Decimal(10, 2)
+  receiptPhotoId   String?  @map("receipt_photo_id")
+  status           String   @default("unconfirmed") // unconfirmed, confirmed, rejected
+  createdAt        DateTime @default(now()) @map("created_at")
+  confirmedAt      DateTime? @map("confirmed_at")
+  confirmedBy      BigInt?  @map("confirmed_by")
+  comment          String?
+
+  @@map("payments")
+}
