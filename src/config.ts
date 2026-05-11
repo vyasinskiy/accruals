@@ -18,7 +18,7 @@ const schema = z.object({
   API_APARTMENTS_PATH: z.string().default(`${defaultApiBaseUrl}/new-web/apartments`),
   API_APARTMENT_INFO_PATH: z.string().default('/new-web/apartments/{apartmentId}/info'),
   API_ACCRUALS_PATH: z.string().default('/new-web/accruals'),
-  API_INVOICE_PATH: z.string().default('/new-web/Accruals/invoice'),
+  API_INVOICE_PATH: z.string().default('/new-web/accruals/invoice'),
   DATA_DIR: z.string().default('./data'),
   STORAGE_STATE_PATH: z.string().default('./data/storage-state.json'),
   DATABASE_URL: z.string().min(1).default('postgresql://postgres:postgres@localhost:5432/kvartplata_watcher?schema=public'),

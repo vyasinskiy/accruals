@@ -11,6 +11,7 @@
     "start:dev": "tsx watch src/main.ts",
     "bootstrap": "tsx src/scripts/bootstrap.ts",
     "scan": "tsx src/scripts/scan.ts",
+    "test": "jest",
     "playwright:install": "PLAYWRIGHT_BROWSERS_PATH=./.playwright-browsers npx playwright install chromium",
     "deploy": "./scripts/deploy.sh",
     "docker:up": "docker compose up -d",
@@ -39,8 +40,12 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
+    "@nestjs/testing": "^11.1.6",
+    "@types/jest": "^29.5.14",
     "@types/node": "^24.6.0",
+    "jest": "^29.7.0",
     "prisma": "^6.6.0",
+    "ts-jest": "^29.2.6",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3"
   }

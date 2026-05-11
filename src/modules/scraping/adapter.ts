@@ -1,8 +1,7 @@
-import crypto from 'node:crypto';
 import fs from 'node:fs';
 import type { BrowserContext, Page } from 'playwright';
 import { config } from '../../config';
-import type { AccrualSnapshot, ApartmentSnapshot, InvoiceSnapshot, ScanResult } from '../../types';
+import type { AccrualSnapshot, ApartmentSnapshot, AccountSnapshot, InvoiceSnapshot, ScanResult } from '../../types';
 
 export class KvartplataAdapter {
   async bootstrap(): Promise<void> {
@@ -70,6 +69,7 @@ export class KvartplataAdapter {
       if (await this.isLoginRequired(page)) {
         return {
           apartments: [],
+          accounts: [],
           accruals: [],
           invoices: [],
           needsLogin: true,
@@ -83,10 +83,11 @@ export class KvartplataAdapter {
         warnings.push(error instanceof Error ? error.message : String(error));
         return null;
       });
-      const apartments = apartmentPayload ? extractApartments(apartmentPayload) : [];
+      const rawApartments = apartmentPayload ? extractApartments(apartmentPayload) : [];
       if (!apartmentPayload) {
         return {
           apartments: [],
+          accounts: [],
           accruals: [],
           invoices: [],
           needsLogin: false,
@@ -94,28 +95,29 @@ export class KvartplataAdapter {
           message: warnings.join(' ')
         };
       }
-      log(`Apartments discovered from /new-web/apartments: ${apartments.length}`);
+      log(`Apartments discovered from /new-web/apartments: ${rawApartments.length}`);
 
-      const selectedApartmentRefs = filters.apartmentExternalIds?.length
-        ? apartments.filter((item) => filters.apartmentExternalIds?.includes(item.externalId))
-        : apartments;
-      log(`Apartments selected for scan: ${selectedApartmentRefs.length}`);
+      const selectedApartments = filters.apartmentExternalIds?.length
+        ? rawApartments.filter((item) => filters.apartmentExternalIds?.includes(item.externalId))
+        : rawApartments;
+      log(`Apartments selected for scan: ${selectedApartments.length}`);
 
-      const apartmentSnapshots: ApartmentSnapshot[] = [];
+      const apartments: ApartmentSnapshot[] = [];
+      const accountSnapshots: AccountSnapshot[] = [];
       const accruals: AccrualSnapshot[] = [];
       const invoices: InvoiceSnapshot[] = [];
-      let accountsFound = 0;
 
-      for (const apartment of selectedApartmentRefs) {
+      for (const apartment of selectedApartments) {
         try {
+          apartments.push(apartment);
           log(`Apartment found: ${formatApartment(apartment)}`);
+          
           const infoPayload = await this.fetchJson(page, config.endpoints.apartmentInfo, {}, { apartmentId: apartment.externalId });
           const accounts = extractAccounts(apartment, infoPayload);
-          accountsFound += accounts.length;
           log(`Accounts found for apartment ${apartment.externalId}: ${accounts.length}`);
 
           for (const account of accounts) {
-            apartmentSnapshots.push(account);
+            accountSnapshots.push(account);
             log(`Scanning account ${account.externalId} for apartment ${apartment.externalId}`);
 
             const accrualPayload = await this.fetchJson(page, config.endpoints.accruals, { accountId: account.externalId });
@@ -123,26 +125,23 @@ export class KvartplataAdapter {
             accruals.push(...accountAccruals);
             log(`Accrual periods found for account ${account.externalId}: ${accountAccruals.length}`);
 
-            // Extract invoice metadata (links), don't download here
             for (const accrual of accountAccruals) {
                 const invoiceUrl = new URL(config.endpoints.invoice, config.API_BASE_URL);
                 invoiceUrl.searchParams.set('AccountId', account.externalId);
-                invoiceUrl.searchParams.set('PeriodId', accrual.periodId ?? accrual.periodLabel);
+                invoiceUrl.searchParams.set('PeriodId', accrual.periodId);
                 
                 invoices.push({
-                    apartmentExternalId: account.externalId,
-                    parentApartmentId: account.parentApartmentId,
+                    accountExternalId: account.externalId,
                     periodLabel: accrual.periodLabel,
                     periodId: accrual.periodId,
                     invoiceUrl: invoiceUrl.toString(),
                     utilitiesUrl: undefined,
                     available: true,
-                    downloaded: false,
-                    fingerprint: buildFingerprint('invoice', account.externalId, accrual.periodId ?? accrual.periodLabel, invoiceUrl.toString()),
+                    uploadedToS3: false,
                     rawJson: JSON.stringify({
                         accountId: account.externalId,
-                        parentApartmentId: account.parentApartmentId,
-                        periodId: accrual.periodId ?? accrual.periodLabel,
+                        apartmentExternalId: apartment.externalId,
+                        periodId: accrual.periodId,
                         invoiceUrl: invoiceUrl.toString()
                     })
                 });
@@ -155,16 +154,16 @@ export class KvartplataAdapter {
         }
       }
 
-      const selectedAccounts = dedupe(apartmentSnapshots, (item) => item.externalId);
       return {
-        apartments: selectedAccounts,
-        accruals,
-        invoices: dedupe(invoices, (item) => item.fingerprint),
+        apartments: dedupe(apartments, (item) => item.externalId),
+        accounts: dedupe(accountSnapshots, (item) => item.externalId),
+        accruals: dedupe(accruals, (item) => `${item.accountExternalId}_${item.periodId}`),
+        invoices: dedupe(invoices, (item) => `${item.accountExternalId}_${item.periodId}`),
         needsLogin: false,
         degraded: warnings.length > 0,
         message: warnings.length
-          ? `Scanned ${selectedApartmentRefs.length} apartment(s), ${accountsFound} account(s). Warnings: ${warnings.join(' ')}`
-          : `Scanned ${selectedApartmentRefs.length} apartment(s), ${accountsFound} account(s).`
+          ? `Scanned ${selectedApartments.length} apartment(s), ${accountSnapshots.length} account(s). Warnings: ${warnings.join(' ')}`
+          : `Scanned ${selectedApartments.length} apartment(s), ${accountSnapshots.length} account(s).`
       };
     } finally {
       if (browser) {
@@ -239,27 +238,34 @@ async function waitForEnter(): Promise<void> {
 
 function extractApartments(payload: unknown): ApartmentSnapshot[] {
   const rows = collectObjects(payload);
-  return dedupe(rows.map((row) => ({
-    externalId: pickString(row, ['id', 'Id', 'apartmentId', 'apartment_id']) ?? crypto.createHash('md5').update(JSON.stringify(row)).digest('hex'),
-    address: pickString(row, ['address', 'Address', 'fullAddress', 'houseAddress']),
-    organization: pickString(row, ['organization', 'Organization', 'company', 'managementCompany']),
-    rawJson: JSON.stringify(row)
-  })), (item) => item.externalId);
+  const results: ApartmentSnapshot[] = [];
+
+  for (const row of rows) {
+    const externalId = pickString(row, ['id', 'Id', 'apartmentId', 'apartment_id']);
+    if (!externalId) continue;
+
+    results.push({
+      externalId,
+      address: pickString(row, ['address', 'Address', 'fullAddress', 'houseAddress']),
+      organization: pickString(row, ['organization', 'Organization', 'company', 'managementCompany']),
+      rawJson: JSON.stringify(row)
+    });
+  }
+
+  return dedupe(results, (item) => item.externalId);
 }
 
-function extractAccounts(apartment: ApartmentSnapshot, payload: unknown): ApartmentSnapshot[] {
+function extractAccounts(apartment: ApartmentSnapshot, payload: unknown): AccountSnapshot[] {
   const accounts = findObjectsAtKeys(payload, ['accounts', 'Accounts']);
   const rows = accounts.length ? accounts : collectObjects(payload);
-  const extracted: ApartmentSnapshot[] = [];
+  const extracted: AccountSnapshot[] = [];
 
   for (const row of rows) {
     const accountId = pickString(row, ['id', 'Id', 'accountId', 'account_id', 'ls', 'personalAccount']);
     if (!accountId) continue;
     extracted.push({
       externalId: accountId,
-      parentApartmentId: apartment.externalId,
-      address: apartment.address ?? pickString(row, ['address', 'Address', 'fullAddress', 'houseAddress']),
-      organization: apartment.organization ?? pickString(row, ['organization', 'Organization', 'company', 'managementCompany']),
+      apartmentExternalId: apartment.externalId,
       accountNumber: pickString(row, ['number', 'Number', 'accountNumber', 'AccountNumber', 'ls', 'personalAccount']) ?? accountId,
       accountLabel: pickString(row, ['name', 'Name', 'caption', 'Caption', 'title', 'Title']),
       rawJson: JSON.stringify({ apartment, account: row })
@@ -269,7 +275,7 @@ function extractAccounts(apartment: ApartmentSnapshot, payload: unknown): Apartm
   return dedupe(extracted, (item) => item.externalId);
 }
 
-function extractAccruals(account: ApartmentSnapshot, payload: unknown): AccrualSnapshot[] {
+function extractAccruals(account: AccountSnapshot, payload: unknown): AccrualSnapshot[] {
   const rows = findObjectsAtKeys(payload, ['accruals', 'Accruals']);
   const sourceRows = rows.length ? rows : collectObjects(payload);
 
@@ -305,19 +311,19 @@ function extractAccruals(account: ApartmentSnapshot, payload: unknown): AccrualS
         buttonMessage ? `button.message=${buttonMessage}` : null
       ].filter(Boolean).join(', ');
 
+      const finalPeriodId = periodId ?? periodLabel;
+
       return {
-        apartmentExternalId: account.externalId,
-        parentApartmentId: account.parentApartmentId,
+        accountExternalId: account.externalId,
         periodLabel,
-        periodId,
+        periodId: finalPeriodId,
         amountText: amountText || undefined,
         statusText: statusText || undefined,
         sourceUrl: undefined,
-        fingerprint: buildFingerprint('accrual', account.externalId, periodId ?? periodLabel, amountText, statusText),
         rawJson: JSON.stringify({ account, accrual: row })
       };
     })
-    .filter((item) => item.periodLabel !== 'unknown' || item.amountText || item.statusText), (item) => item.fingerprint);
+    .filter((item) => item.periodLabel !== 'unknown' || item.amountText || item.statusText), (item) => `${item.accountExternalId}_${item.periodId}`);
 }
 
 function collectObjects(payload: unknown): Record<string, unknown>[] {
@@ -383,10 +389,6 @@ function applyPathParams(endpoint: string, params: Record<string, string>): stri
     value = value.replaceAll(`{${key}}`, encodeURIComponent(paramValue));
   }
   return value;
-}
-
-function buildFingerprint(...parts: string[]): string {
-  return crypto.createHash('sha256').update(parts.join('|')).digest('hex');
 }
 
 function dedupe<T>(items: T[], getKey: (item: T) => string): T[] {

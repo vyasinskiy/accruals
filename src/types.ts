@@ -2,42 +2,44 @@ export type RunStatus = 'success' | 'warning' | 'needs_login' | 'error';
 
 export interface ApartmentSnapshot {
   externalId: string;
-  parentApartmentId?: string;
   address?: string;
   organization?: string;
+  rawJson?: string;
+}
+
+export interface AccountSnapshot {
+  externalId: string;
+  apartmentExternalId: string;
   accountNumber?: string;
   accountLabel?: string;
   rawJson?: string;
 }
 
 export interface AccrualSnapshot {
-  apartmentExternalId: string;
-  parentApartmentId?: string;
+  accountExternalId: string;
   periodLabel: string;
-  periodId?: string;
+  periodId: string;
   amountText?: string;
   statusText?: string;
   sourceUrl?: string;
-  fingerprint: string;
   rawJson?: string;
 }
 
 export interface InvoiceSnapshot {
-  apartmentExternalId: string;
-  parentApartmentId?: string;
+  accountExternalId: string;
   periodLabel: string;
-  periodId?: string;
+  periodId: string;
   invoiceUrl?: string;
   utilitiesUrl?: string;
   available: boolean;
-  downloaded: boolean;
-  fingerprint: string;
+  uploadedToS3: boolean;
   localFilePath?: string;
   rawJson?: string;
 }
 
 export interface ScanResult {
   apartments: ApartmentSnapshot[];
+  accounts: AccountSnapshot[];
   accruals: AccrualSnapshot[];
   invoices: InvoiceSnapshot[];
   needsLogin: boolean;

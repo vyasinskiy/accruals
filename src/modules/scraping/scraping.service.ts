@@ -1,12 +1,13 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import { lastValueFrom } from 'rxjs';
 import { Inject, Injectable } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
 import { Cron } from '@nestjs/schedule';
 import { AccountantClientService } from '../../common/services/accountant-client.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { config } from '../../config';
-import type { AccrualSnapshot, ApartmentSnapshot, InvoiceSnapshot, ScanSummary } from '../../types';
+import type { AccrualSnapshot, ApartmentSnapshot, AccountSnapshot, InvoiceSnapshot, ScanSummary } from '../../types';
 import { KvartplataAdapter } from './adapter';
 import { ManualScanDto } from './dto/manual-scan.dto';
 
@@ -39,18 +40,18 @@ export class ScrapingService {
       console.log(`[${timestamp}] [scan:${trigger}] ${message}`);
     };
 
-    await this.prisma.run.create({
-      data: {
-        id: runId,
-        startedAt,
-        trigger,
-        status: 'warning',
-        message: 'Run started',
-        summaryJson: '{}'
-      }
-    });
-
     try {
+      await this.prisma.run.create({
+        data: {
+          id: runId,
+          startedAt,
+          trigger,
+          status: 'warning',
+          message: 'Run started',
+          summaryJson: '{}'
+        }
+      });
+
       log('Run started');
       const dbApartments = await this.accountantClientService.findApartments({
         externalId: input.apartmentExternalId,
@@ -59,10 +60,11 @@ export class ScrapingService {
       });
       const hasExplicitApartmentFilter = Boolean(input.apartmentExternalId || input.address || input.organization);
       if (hasExplicitApartmentFilter) {
-        log(`DB filter matched apartments/accounts: ${dbApartments.length}`);
+        log(`DB filter matched apartments: ${dbApartments.length}`);
       }
 
       let apartments: ApartmentSnapshot[] = [];
+      let accounts: AccountSnapshot[] = [];
       let accruals: AccrualSnapshot[] = [];
       let invoices: InvoiceSnapshot[] = [];
       let needsLogin = false;
@@ -82,6 +84,7 @@ export class ScrapingService {
             log
           });
           apartments = scan.apartments;
+          accounts = scan.accounts;
           accruals = scan.accruals;
           invoices = scan.invoices;
           needsLogin = scan.needsLogin;
@@ -113,62 +116,122 @@ export class ScrapingService {
       }
 
       apartments = dedupe(apartments, (item) => item.externalId);
-      accruals = dedupe(accruals, (item) => item.fingerprint);
-      invoices = dedupe(invoices, (item) => item.fingerprint);
+      accounts = dedupe(accounts, (item) => item.externalId);
+      accruals = dedupe(accruals, (item) => `${item.accountExternalId}_${item.periodId}`);
+      invoices = dedupe(invoices, (item) => `${item.accountExternalId}_${item.periodId}`);
 
-      // Async emit: just tell accountant to save, don't wait
+      // 1. Process Apartments (Wait for completion)
       for (const apartment of apartments) {
-        this.accountantClient.emit('upsert_apartment', apartment);
+        await lastValueFrom(this.accountantClient.send('upsert_apartment', apartment));
       }
-      log(`Apartments/accounts discovery sent to accountant: total=${apartments.length}`);
+      log(`Apartments discovery sent to accountant: total=${apartments.length}`);
 
+      // 2. Process Accounts (MUST follow apartments, wait for completion)
+      for (const account of accounts) {
+        await lastValueFrom(this.accountantClient.send('upsert_account', account));
+      }
+      log(`Accounts discovery sent to accountant: total=${accounts.length}`);
+
+      // 3. Process Accruals
       for (const accrual of accruals) {
         this.accountantClient.emit('upsert_accrual', accrual);
       }
       log(`Accruals discovery sent to accountant: total=${accruals.length}`);
 
-      let uploadedInvoices = 0;
+      let uploadedInvoicesCount = 0;
+      let skippedInvoices = 0;
+      const uploadErrors: string[] = [];
+
+      // 4. Process Invoices (Involves S3 upload which takes time, ensuring accounts are likely processed by now)
+      // Optimized: Fetch all already uploaded invoices for these accounts to avoid N+1 requests
+      const accountIds = accounts.map(a => a.externalId);
+      const existingUploadedInvoices = await this.accountantClientService.findInvoices({
+          accountExternalId: accountIds,
+          uploadedToS3: true
+      });
+      const uploadedMap = new Set(existingUploadedInvoices.map((inv: any) => `${inv.accountExternalId}_${inv.periodId}`));
+
       for (const invoice of invoices) {
+        let shouldUpsert = true;
         if (invoice.available && invoice.invoiceUrl) {
           try {
-            // 1. Get pre-signed URL from accountant
-            const { url, key } = await this.accountantClientService.getUploadUrl(invoice.apartmentExternalId, invoice.periodLabel);
-            
-            // 2. Download from external site
-            log(`Downloading invoice: ${invoice.periodLabel} (${invoice.apartmentExternalId})`);
-            const pdfBuffer = await this.adapter.downloadInvoice(invoice.invoiceUrl);
-            
-            // 3. Upload to S3 directly via pre-signed URL
-            const uploadResponse = await fetch(url, {
-                method: 'PUT',
-                body: new Uint8Array(pdfBuffer),
-                headers: { 'Content-Type': 'application/pdf' }
-            });
+            if (uploadedMap.has(`${invoice.accountExternalId}_${invoice.periodId}`)) {
+              log(`Invoice already in S3 (skipped): ${invoice.periodLabel} (${invoice.accountExternalId})`);
+              skippedInvoices++;
+            } else {
+              const { url, key } = await this.accountantClientService.getUploadUrl(invoice.accountExternalId, invoice.periodLabel);
+              
+              log(`Downloading invoice: ${invoice.periodLabel} (${invoice.accountExternalId})`);
+              const pdfBuffer = await this.adapter.downloadInvoice(invoice.invoiceUrl);
 
-            if (!uploadResponse.ok) {
-                throw new Error(`S3 upload failed: ${uploadResponse.statusText}`);
+              try {
+                  const uploadResponse = await fetch(url, {
+                      method: 'PUT',
+                      body: new Uint8Array(pdfBuffer),
+                      headers: { 'Content-Type': 'application/pdf' }
+                  });
+
+                  if (!uploadResponse.ok) {
+                      throw new Error(`S3 upload failed with status ${uploadResponse.status}: ${uploadResponse.statusText}`);
+                  }
+                  log(`Successfully uploaded to S3: ${invoice.periodLabel} (${key})`);
+              } catch (fetchError: any) {
+                  const detailedMsg = [
+                      fetchError.message,
+                      fetchError.cause?.code ? `[Code: ${fetchError.cause.code}]` : null,
+                      fetchError.cause?.message ? `(Cause: ${fetchError.cause.message})` : null
+                  ].filter(Boolean).join(' ');
+                  throw new Error(`Network error during S3 upload to ${url}: ${detailedMsg}`, { cause: fetchError });
+              }
+
+              // 4. Enrich metadata
+              const raw = JSON.parse(invoice.rawJson || '{}');
+              raw.s3Key = key;
+              invoice.rawJson = JSON.stringify(raw);
+              invoice.uploadedToS3 = true;
+              invoice.localFilePath = key;
+              uploadedInvoicesCount++;
             }
-
-            // 4. Enrich metadata
-            const raw = JSON.parse(invoice.rawJson || '{}');
-            raw.s3Key = key;
-            invoice.rawJson = JSON.stringify(raw);
-            invoice.downloaded = true;
-            invoice.localFilePath = key; // Use S3 key as path reference
-            uploadedInvoices++;
           } catch (err: any) {
-            log(`Failed to process S3 upload for invoice: ${err.message}`);
+            const red = '\x1b[31m';
+            const reset = '\x1b[0m';
+            const errorMsg = `Invoice ${invoice.periodLabel} (${invoice.accountExternalId}): ${err.message.trim()}`;
+            log(`${red}Failed to process S3 upload for ${errorMsg}${reset}`);
+            uploadErrors.push(errorMsg);
           }
         }
-        this.accountantClient.emit('upsert_invoice', invoice);
+        
+        if (shouldUpsert) {
+            this.accountantClient.emit('upsert_invoice', invoice);
+        }
       }
-      log(`Invoices discovery sent to accountant: total=${invoices.length}, uploaded=${uploadedInvoices}`);
+
+      const blue = '\x1b[34m';
+      const green = '\x1b[32m';
+      const yellow = '\x1b[33m';
+      const red = '\x1b[31m';
+      const reset = '\x1b[0m';
+
+      log(`${blue}--- Scan Results Overview ---${reset}`);
+      log(`Apartments/Accounts discovered: ${apartments.length} / ${accounts.length}`);
+      log(`Accruals observed: ${accruals.length}`);
+      log(`Invoices discovered: ${invoices.length}`);
+      log(`${green}Successfully processed/uploaded: ${uploadedInvoicesCount}${reset}`);
+      log(`${yellow}Skipped (already in S3): ${skippedInvoices}${reset}`);
+      
+      if (uploadErrors.length > 0) {
+        log(`${red}Errors encountered: ${uploadErrors.length}${reset}`);
+        for (const error of uploadErrors) {
+          log(`${red}  - ${error}${reset}`);
+        }
+      }
+      log(`${blue}-----------------------------${reset}`);
 
       const summary = await this.finalize(runId, {
         startedAt: startedAt.toISOString(),
         finishedAt: new Date().toISOString(),
         trigger,
-        status: degraded ? 'warning' : 'success',
+        status: (degraded || uploadErrors.length > 0) ? 'warning' : 'success',
         message,
         apartmentsScanned: apartments.length,
         accrualsObserved: accruals.length,
@@ -184,20 +247,26 @@ export class ScrapingService {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       log(`Run failed: ${message}`);
-      return await this.finalize(runId, {
-        startedAt: startedAt.toISOString(),
-        finishedAt: new Date().toISOString(),
-        trigger,
-        status: 'error',
-        message,
-        apartmentsScanned: 0,
-        accrualsObserved: 0,
-        invoicesObserved: 0,
-        newApartments: 0,
-        newAccruals: 0,
-        newInvoices: 0,
-        needsLogin: false
-      });
+      
+      try {
+          return await this.finalize(runId, {
+            startedAt: startedAt.toISOString(),
+            finishedAt: new Date().toISOString(),
+            trigger,
+            status: 'error',
+            message,
+            apartmentsScanned: 0,
+            accrualsObserved: 0,
+            invoicesObserved: 0,
+            newApartments: 0,
+            newAccruals: 0,
+            newInvoices: 0,
+            needsLogin: false
+          });
+      } catch (finalizeError) {
+          log(`Final fatal error (could not even finalize run): ${finalizeError instanceof Error ? finalizeError.message : String(finalizeError)}`);
+          throw error;
+      }
     }
   }
 
