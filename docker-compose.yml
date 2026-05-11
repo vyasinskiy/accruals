@@ -60,6 +60,7 @@ services:
       - ${WATCHER_PATH:-../accruals-watcher}/.env
     environment:
       RABBITMQ_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASS:-guest}@rabbitmq:5672
+      ACCOUNTANT_API_URL: http://accountant:3005
       BROWSER_WS_ENDPOINT: ""
       BROWSER_PROFILE_PATH: "/app/data/browser-profile/.config/chromium"
       IS_DOCKER: "true"
@@ -80,6 +81,8 @@ services:
       dockerfile: Dockerfile
     container_name: accruals-accountant
     restart: unless-stopped
+    ports:
+      - '3005:3005'
     env_file:
       - ${ACCOUNTANT_PATH:-../accruals-accountant}/.env
     environment:
