@@ -77,20 +77,6 @@ export class BotInteractionService implements OnModuleInit {
           ctx.session.amount = undefined;
 
           await ctx.reply('Оплата добавлена и отправлена на подтверждение админу.');
-
-          // Notify admin
-          if (config.ADMIN_CHAT_ID) {
-            await this.bot.telegram.sendPhoto(config.ADMIN_CHAT_ID, photo.file_id, {
-              caption: `🆕 <b>Новая оплата на подтверждение!</b>\n\nПользователь: ${ctx.from.username || ctx.from.first_name}\nСумма: ${amount}\n\nПодтвердите получение средств:`,
-              parse_mode: 'HTML',
-              ...Markup.inlineKeyboard([
-                [
-                  Markup.button.callback('✅ Подтвердить', `confirm_payment_${payment.id}`),
-                  Markup.button.callback('❌ Отклонить', `reject_payment_${payment.id}`)
-                ]
-              ])
-            });
-          }
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           this.logger.error(`Failed to create payment: ${message}`);

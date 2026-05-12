@@ -19,12 +19,8 @@ export class BotNotificationService implements OnModuleInit {
     await this.bot.telegram.sendMessage(targetChatId, message, { parse_mode: 'HTML' });
   }
 
-  async sendAdminNotification(message: string, extra?: any) {
-    if (!config.ADMIN_CHAT_ID) {
-      console.error('No ADMIN_CHAT_ID provided');
-      return;
-    }
-    await this.bot.telegram.sendMessage(config.ADMIN_CHAT_ID, message, {
+  async sendAdminNotification(message: string, targetChatId: string, extra?: any) {
+    await this.bot.telegram.sendMessage(targetChatId, message, {
       parse_mode: 'HTML',
       ...extra,
     });
