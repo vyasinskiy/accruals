@@ -216,7 +216,7 @@ export class AccountantService {
   async createPayment(data: { userId: number; userName: string; amount: number; receiptPhotoId: string }) {
     const result = await this.prisma.payment.create({
       data: {
-        userId: BigInt(data.userId),
+        userId: data.userId,
         userName: data.userName,
         amount: data.amount,
         receiptPhotoId: data.receiptPhotoId,

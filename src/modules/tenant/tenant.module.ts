@@ -1,15 +1,15 @@
 import { Module } from '@nestjs/common';
 import { ClientsModule, Transport } from '@nestjs/microservices';
-import { AccountantController } from './accountant.controller';
-import { AccountantService } from './accountant.service';
+import { TenantController } from './tenant.controller';
+import { TenantRegistrationService } from './tenant-registration.service';
+import { TenantPaymentService } from './tenant-payment.service';
+import { TenantInvoiceService } from './tenant-invoice.service';
 import { PrismaModule } from '../../common/prisma/prisma.module';
-import { S3Module } from '../s3/s3.module';
 import { config } from '../../common/config/config';
 
 @Module({
   imports: [
     PrismaModule,
-    S3Module,
     ClientsModule.register([
       {
         name: 'NOTIFICATIONS_SERVICE',
@@ -24,9 +24,11 @@ import { config } from '../../common/config/config';
       },
     ]),
   ],
-  controllers: [AccountantController],
+  controllers: [TenantController],
   providers: [
-    AccountantService
+    TenantRegistrationService,
+    TenantPaymentService,
+    TenantInvoiceService
   ],
 })
-export class AccountantModule {}
+export class TenantModule {}

@@ -1,4 +1,4 @@
-import { Controller, Get, Query, Param, ParseIntPipe, NotFoundException, Res, Logger } from '@nestjs/common';
+import { Controller, Get, Query, Param, ParseIntPipe, NotFoundException, Res, Logger, Post, Body } from '@nestjs/common';
 import { EventPattern, Payload, MessagePattern } from '@nestjs/microservices';
 import { AccountantService } from './accountant.service';
 import { S3StorageService } from '../s3/s3-storage.service';
@@ -101,3 +101,4 @@ export class AccountantController {
     return { url, key };
   }
 }
+

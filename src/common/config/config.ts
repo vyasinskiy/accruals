@@ -13,6 +13,7 @@ const configSchema = z.object({
   S3_SECRET_ACCESS_KEY: z.string().default(''),
   S3_PREFIX: z.string().default(''),
   S3_SIGNED_URL_TTL: z.coerce.number().int().positive().default(3600),
+  SUPER_ADMIN_TELEGRAM_ID: z.string().optional(),
 });
 
 const env = configSchema.parse(process.env);

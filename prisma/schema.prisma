@@ -17,10 +17,38 @@ model Apartment {
   firstSeenAt   DateTime  @map("first_seen_at")
   lastSeenAt    DateTime  @map("last_seen_at")
   accounts      Account[]
+  tenants       Tenant[]
 
   @@index([address], map: "idx_apartments_address")
   @@index([organization], map: "idx_apartments_organization")
   @@map("apartments")
+}
+
+model User {
+  id              Int       @id @default(autoincrement())
+  telegramId      BigInt    @unique @map("telegram_id")
+  name            String?
+  role            String    @default("tenant") // admin, tenant
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  tenantProfile   Tenant?
+  payments        Payment[]
+
+  @@map("users")
+}
+
+model Tenant {
+  id              Int       @id @default(autoincrement())
+  userId          Int       @unique @map("user_id")
+  apartmentId     Int       @map("apartment_id")
+  rentPaymentDay  Int       @map("rent_payment_day")
+  status          String    @default("pending") // pending, active, rejected
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  apartment       Apartment @relation(fields: [apartmentId], references: [id], onDelete: Cascade)
+
+  @@map("tenants")
 }
 
 model Account {
@@ -82,7 +110,7 @@ model Invoice {
 
 model Payment {
   id               Int      @id @default(autoincrement())
-  userId           BigInt   @map("user_id")
+  userId           Int      @map("user_id")
   userName         String?  @map("user_name")
   amount           Decimal  @db.Decimal(10, 2)
   receiptPhotoId   String?  @map("receipt_photo_id")
@@ -92,5 +120,8 @@ model Payment {
   confirmedBy      BigInt?  @map("confirmed_by")
   comment          String?
 
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   @@map("payments")
 }
+
