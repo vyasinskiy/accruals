@@ -40,7 +40,7 @@ services:
       - PGID=1000
       - TZ=Europe/Moscow
     volumes:
-      - ${WATCHER_PATH:-../accruals-watcher}/data/browser-profile:/config
+      - ${WATCHER_PATH:-../apps/watcher}/data/browser-profile:/config
     ports:
       - '3002:3000'
     networks:
@@ -50,14 +50,14 @@ services:
   watcher:
     image: accruals-watcher:latest
     build:
-      context: ${WATCHER_PATH:-../accruals-watcher}
+      context: ${WATCHER_PATH:-../apps/watcher}
       dockerfile: Dockerfile
     container_name: accruals-watcher
     restart: unless-stopped
     ports:
       - '4500:4500'
     env_file:
-      - ${WATCHER_PATH:-../accruals-watcher}/.env
+      - ${WATCHER_PATH:-../apps/watcher}/.env
     environment:
       RABBITMQ_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASS:-guest}@rabbitmq:5672
       ACCOUNTANT_API_URL: http://accountant:3005
@@ -70,21 +70,21 @@ services:
       accountant:
         condition: service_started
     volumes:
-      - ${WATCHER_PATH:-../accruals-watcher}/data:/app/data
+      - ${WATCHER_PATH:-../apps/watcher}/data:/app/data
     networks:
       - accruals-network
 
   accountant:
     image: accruals-accountant:latest
     build:
-      context: ${ACCOUNTANT_PATH:-../accruals-accountant}
+      context: ${ACCOUNTANT_PATH:-../apps/accountant}
       dockerfile: Dockerfile
     container_name: accruals-accountant
     restart: unless-stopped
     ports:
       - '3005:3005'
     env_file:
-      - ${ACCOUNTANT_PATH:-../accruals-accountant}/.env
+      - ${ACCOUNTANT_PATH:-../apps/accountant}/.env
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-kvartplata_watcher}?schema=public
       RABBITMQ_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASS:-guest}@rabbitmq:5672
@@ -100,12 +100,12 @@ services:
   bot:
     image: accruals-bot:latest
     build:
-      context: ${BOT_PATH:-../accruals-bot}
+      context: ${BOT_PATH:-../apps/bot}
       dockerfile: Dockerfile
     container_name: accruals-bot
     restart: unless-stopped
     env_file:
-      - ${BOT_PATH:-../accruals-bot}/.env
+      - ${BOT_PATH:-../apps/bot}/.env
     environment:
       RABBITMQ_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASS:-guest}@rabbitmq:5672
     depends_on:
