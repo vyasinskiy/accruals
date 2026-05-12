@@ -88,6 +88,7 @@ services:
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-kvartplata_watcher}?schema=public
       RABBITMQ_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASS:-guest}@rabbitmq:5672
+      SUPER_ADMIN_TELEGRAM_ID: ${SUPER_ADMIN_TELEGRAM_ID}
     depends_on:
       postgres:
         condition: service_healthy
@@ -107,7 +108,6 @@ services:
       - ${BOT_PATH:-../accruals-bot}/.env
     environment:
       RABBITMQ_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASS:-guest}@rabbitmq:5672
-      ADMIN_CHAT_ID: ${ADMIN_CHAT_ID}
     depends_on:
       rabbitmq:
         condition: service_started
