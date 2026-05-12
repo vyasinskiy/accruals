@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.env
+data/
+.npm-cache/
+playwright-report/
+.playwright-browsers/

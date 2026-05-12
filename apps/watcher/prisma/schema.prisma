@@ -1,0 +1,27 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:../data/watcher.db"
+}
+
+model Run {
+  id                String    @id
+  startedAt         DateTime  @map("started_at")
+  finishedAt        DateTime? @map("finished_at")
+  trigger           String    @default("manual")
+  status            String
+  message           String
+  apartmentsScanned Int       @default(0) @map("apartments_scanned")
+  accrualsObserved  Int       @default(0) @map("accruals_observed")
+  invoicesObserved  Int       @default(0) @map("invoices_observed")
+  newApartments     Int       @default(0) @map("new_apartments")
+  newAccruals       Int       @default(0) @map("new_accruals")
+  newInvoices       Int       @default(0) @map("new_invoices")
+  needsLogin        Boolean   @default(false) @map("needs_login")
+  summaryJson       String    @default("{}") @map("summary_json")
+
+  @@map("runs")
+}
