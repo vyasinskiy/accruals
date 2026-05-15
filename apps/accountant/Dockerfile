@@ -6,6 +6,7 @@ COPY package*.json ./
 RUN npm install
 
 COPY . .
+RUN mkdir -p node_modules/@prisma/client-accountant/runtime
 RUN npx prisma generate
 RUN npm run build
 

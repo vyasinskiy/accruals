@@ -3,6 +3,7 @@ import { Telegraf, Markup } from 'telegraf';
 import { ClientProxy } from '@nestjs/microservices';
 import { firstValueFrom } from 'rxjs';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { config } from '../../common/config/config';
 
 @Injectable()
 export class AdminInteractionService {
@@ -55,12 +56,16 @@ export class AdminInteractionService {
         for (const u of users) {
            const roleStr = u.role === 'admin' ? '(Админ)' : '(Арендатор)';
            const name = [u.firstName, u.lastName].filter(Boolean).join(' ') || u.username || 'Неизвестно';
+           const isSuperAdmin = u.telegramId.toString() === config.SUPER_ADMIN_TELEGRAM_ID;
+
+           const buttons = [];
+           if (!isSuperAdmin) {
+             buttons.push(Markup.button.callback('❌ Удалить', `admin_delete_user_${u.id}`));
+           }
            
            await ctx.reply(`👤 <b>${name}</b> ${roleStr}\nTG ID: ${u.telegramId}`, {
              parse_mode: 'HTML',
-             ...Markup.inlineKeyboard([
-               Markup.button.callback('❌ Удалить', `admin_delete_user_${u.id}`)
-             ])
+             ...(buttons.length > 0 ? Markup.inlineKeyboard(buttons) : {})
            });
         }
       } catch (e) {

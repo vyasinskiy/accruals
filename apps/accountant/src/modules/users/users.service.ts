@@ -66,13 +66,26 @@ export class UsersService implements OnModuleInit {
   }
 
   async deleteUser(userId: number) {
-    const user = await this.prisma.user.delete({
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      include: { identities: true }
+    });
+
+    if (user?.identities.some(i => i.platform === 'telegram' && i.externalId === config.SUPER_ADMIN_TELEGRAM_ID)) {
+      throw new Error('Cannot delete Super Admin user');
+    }
+
+    const deletedUser = await this.prisma.user.delete({
       where: { id: userId }
     });
-    return this.serialize(user);
+    return this.serialize(deletedUser);
   }
 
   async deleteUserByPlatformIdentity(platform: string, externalId: string) {
+    if (platform === 'telegram' && externalId === config.SUPER_ADMIN_TELEGRAM_ID) {
+      throw new Error('Cannot delete Super Admin user');
+    }
+
     const identity = await this.prisma.userIdentity.findUnique({
       where: { platform_externalId: { platform, externalId } }
     });

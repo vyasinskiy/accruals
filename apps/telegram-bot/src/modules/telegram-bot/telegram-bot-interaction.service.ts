@@ -56,6 +56,7 @@ export class TelegramBotInteractionService implements OnModuleInit {
             username: ctx.from.username,
             firstName: ctx.from.first_name,
             lastName: ctx.from.last_name,
+            role: ctx.from.id.toString() === config.SUPER_ADMIN_TELEGRAM_ID ? 'admin' : 'tenant'
           }
         });
 

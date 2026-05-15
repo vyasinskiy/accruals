@@ -17,7 +17,6 @@
     "@nestjs/core": "^11.1.6",
     "@nestjs/microservices": "^11.1.6",
     "@nestjs/platform-express": "^11.1.6",
-    "@prisma/client": "^6.6.0",
     "amqp-connection-manager": "^4.1.14",
     "amqplib": "^0.10.5",
     "dotenv": "^16.6.1",
@@ -29,6 +28,7 @@
   "devDependencies": {
     "@types/node": "^24.6.0",
     "prisma": "6.6.0",
+    "@prisma/client": "6.6.0",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3"
   }
