@@ -1,15 +1,13 @@
 import { Controller } from '@nestjs/common';
 import { MessagePattern, Payload } from '@nestjs/microservices';
 import { TenantRegistrationService } from './tenant-registration.service';
-import { TenantPaymentService } from './tenant-payment.service';
-import { TenantInvoiceService } from './tenant-invoice.service';
+import { TenantService } from './tenant.service';
 
 @Controller('tenant')
 export class TenantController {
   constructor(
     private readonly tenantRegistrationService: TenantRegistrationService,
-    private readonly tenantPaymentService: TenantPaymentService,
-    private readonly tenantInvoiceService: TenantInvoiceService,
+    private readonly tenantService: TenantService,
   ) {}
 
   @MessagePattern('create_tenant')
@@ -32,18 +30,28 @@ export class TenantController {
     return this.tenantRegistrationService.getTenantByTelegramId(data.telegramId);
   }
 
+  @MessagePattern('get_pending_tenants')
+  async getPendingTenants() {
+    return this.tenantRegistrationService.getPendingTenants();
+  }
+
+  @MessagePattern('link_tenant_apartment')
+  async linkTenantApartment(@Payload() data: { tenantId: number; apartmentId: number }) {
+    return this.tenantRegistrationService.linkTenantApartment(data.tenantId, data.apartmentId);
+  }
+
   @MessagePattern('add_tenant_payment')
   async addTenantPayment(@Payload() data: any) {
-    return this.tenantPaymentService.addPayment(data);
+    return this.tenantService.addPayment(data);
   }
 
   @MessagePattern('get_tenant_invoices')
   async getTenantInvoices(@Payload() data: { telegramId: string | number }) {
-    return this.tenantInvoiceService.getInvoices(data.telegramId);
+    return this.tenantService.getInvoices(data.telegramId);
   }
 
   @MessagePattern('get_tenant_debt')
   async getTenantDebt(@Payload() data: { telegramId: string | number }) {
-    return this.tenantInvoiceService.getCurrentDebt(data.telegramId);
+    return this.tenantService.getCurrentDebt(data.telegramId);
   }
 }

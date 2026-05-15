@@ -1,8 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ClientsModule, Transport } from '@nestjs/microservices';
-import { BotController } from './bot.controller';
-import { BotNotificationService } from './bot-notification.service';
-import { BotInteractionService } from './bot-interaction.service';
+import { AdminInteractionService } from './admin-interaction.service';
 import { config } from '../../common/config/config';
 
 @Module({
@@ -21,8 +19,7 @@ import { config } from '../../common/config/config';
       },
     ]),
   ],
-  providers: [BotNotificationService, BotInteractionService],
-  controllers: [BotController],
-  exports: [BotNotificationService],
+  providers: [AdminInteractionService],
+  exports: [AdminInteractionService],
 })
-export class BotModule {}
+export class AdminModule {}

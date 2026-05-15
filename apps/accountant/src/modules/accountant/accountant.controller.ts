@@ -51,6 +51,11 @@ export class AccountantController {
     return this.accountantService.rejectPayment(data.paymentId, data.confirmedBy, data.comment);
   }
 
+  @MessagePattern('get_apartments')
+  async getApartments(@Payload() query: any = {}) {
+    return this.accountantService.findApartments(query);
+  }
+
   @Get('apartments')
   async findApartments(@Query() query: any) {
     return this.accountantService.findApartments(query);
@@ -87,6 +92,16 @@ export class AccountantController {
       return res.redirect(result.downloadUrl);
     }
     throw new NotFoundException(`Invoice PDF not available for download`);
+  }
+
+  @MessagePattern('get_apartment')
+  async getApartment(@Payload() id: number) {
+    return this.accountantService.findApartmentById(id);
+  }
+
+  @MessagePattern('get_tenant_by_apartment')
+  async getTenantByApartment(@Payload() apartmentId: number) {
+    return this.accountantService.findTenantByApartment(apartmentId);
   }
 
   @Get('apartments/:id')

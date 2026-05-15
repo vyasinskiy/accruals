@@ -20,21 +20,22 @@ fi
 
 WATCHER_PATH=${WATCHER_PATH:-../accruals-watcher}
 ACCOUNTANT_PATH=${ACCOUNTANT_PATH:-../accruals-accountant}
-BOT_PATH=${BOT_PATH:-../accruals-bot}
+TELEGRAM_BOT_PATH=${TELEGRAM_BOT_PATH:-../accruals-telegram-bot}
 
 # 2. Build images
 echo "📦 Building Watcher..."
 docker build -t accruals-watcher:latest "${WATCHER_PATH}"
 echo "📦 Building Accountant..."
 docker build -t accruals-accountant:latest "${ACCOUNTANT_PATH}"
-echo "📦 Building Bot..."
-docker build -t accruals-bot:latest "${BOT_PATH}"
+echo "📦 Building Telegram Bot..."
+docker build -t accruals-telegram-bot:latest "${TELEGRAM_BOT_PATH}"
 
-# 3. Start only the Database and RabbitMQ for preparation
-echo "🏗️  Starting Database and RabbitMQ..."
-WATCHER_PATH=$WATCHER_PATH ACCOUNTANT_PATH=$ACCOUNTANT_PATH BOT_PATH=$BOT_PATH docker compose up -d postgres rabbitmq
+# 3. Start the infrastructure
+echo "🏗️  Starting infrastructure services (Database, RabbitMQ)..."
+WATCHER_PATH=$WATCHER_PATH ACCOUNTANT_PATH=$ACCOUNTANT_PATH TELEGRAM_BOT_PATH=$TELEGRAM_BOT_PATH docker compose up -d postgres rabbitmq
 
 # 4. Wait for the database to be ready (maximum 30 seconds)
+# This ensures services don't fail immediately on first start
 echo "⏳ Waiting for PostgreSQL to be ready..."
 MAX_RETRIES=30
 COUNT=0
@@ -49,15 +50,9 @@ if [ $COUNT -eq $MAX_RETRIES ]; then
     error_exit "PostgreSQL is not ready after 30 seconds."
 fi
 
-# 5. Apply migrations/database schema
-echo "🗄️  Syncing database schema..."
-cd "${WATCHER_PATH}"
-# Pass DATABASE_URL for local connection to port 5432
-DATABASE_URL="postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@localhost:5432/${POSTGRES_DB:-kvartplata_watcher}?schema=public" npx prisma db push
-cd - > /dev/null
-
-# 6. Start everything else
+# 5. Start application services
+# Migrations are handled internally by each service on startup
 echo "🚀 Starting application services..."
-WATCHER_PATH=$WATCHER_PATH ACCOUNTANT_PATH=$ACCOUNTANT_PATH BOT_PATH=$BOT_PATH docker compose up -d
+WATCHER_PATH=$WATCHER_PATH ACCOUNTANT_PATH=$ACCOUNTANT_PATH TELEGRAM_BOT_PATH=$TELEGRAM_BOT_PATH docker compose up -d
 
 echo "✅ System is up and running!"

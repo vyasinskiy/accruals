@@ -3,7 +3,7 @@ import { Telegraf } from 'telegraf';
 import { config } from '../../common/config/config';
 
 @Injectable()
-export class BotNotificationService implements OnModuleInit {
+export class TelegramBotNotificationService implements OnModuleInit {
   private bot: Telegraf;
 
   onModuleInit() {
@@ -21,6 +21,14 @@ export class BotNotificationService implements OnModuleInit {
 
   async sendAdminNotification(message: string, targetChatId: string, extra?: any) {
     await this.bot.telegram.sendMessage(targetChatId, message, {
+      parse_mode: 'HTML',
+      ...extra,
+    });
+  }
+
+  async sendAdminPhotoNotification(photoId: string, caption: string, targetChatId: string, extra?: any) {
+    await this.bot.telegram.sendPhoto(targetChatId, photoId, {
+      caption,
       parse_mode: 'HTML',
       ...extra,
     });

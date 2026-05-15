@@ -87,6 +87,7 @@ services:
       - ${ACCOUNTANT_PATH:-../apps/accountant}/.env
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-kvartplata_watcher}?schema=public
+      DIRECT_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-kvartplata_watcher}?schema=public
       RABBITMQ_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASS:-guest}@rabbitmq:5672
       SUPER_ADMIN_TELEGRAM_ID: ${SUPER_ADMIN_TELEGRAM_ID}
     depends_on:
@@ -97,17 +98,18 @@ services:
     networks:
       - accruals-network
 
-  bot:
-    image: accruals-bot:latest
+  telegram-bot:
+    image: accruals-telegram-bot:latest
     build:
-      context: ${BOT_PATH:-../apps/bot}
+      context: ${TELEGRAM_BOT_PATH:-../apps/telegram-bot}
       dockerfile: Dockerfile
-    container_name: accruals-bot
+    container_name: accruals-telegram-bot
     restart: unless-stopped
     env_file:
-      - ${BOT_PATH:-../apps/bot}/.env
+      - ${TELEGRAM_BOT_PATH:-../apps/telegram-bot}/.env
     environment:
       RABBITMQ_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASS:-guest}@rabbitmq:5672
+      TELEGRAM_BOT_DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-kvartplata_watcher}?schema=telegram_bot
     depends_on:
       rabbitmq:
         condition: service_started

@@ -15,6 +15,6 @@ async function bootstrap() {
     },
   });
   await app.listen();
-  console.log('Bot Microservice is listening...');
+  console.log('Telegram Bot Microservice is listening...');
 }
 bootstrap();

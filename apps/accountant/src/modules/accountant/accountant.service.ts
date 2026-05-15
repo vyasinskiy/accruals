@@ -138,9 +138,11 @@ export class AccountantService {
     });
 
     if (!existing) {
-      const apartment = await this.prisma.apartment.findUnique({ where: { id: account.apartmentId } });
-      this.notificationsClient.emit('notify_accrual', {
-        message: `🔔 <b>Новое начисление!</b>\n\nПериод: ${data.periodLabel}\nСумма: ${data.amountText}\nСтатус: ${data.statusText}\nАдрес: ${apartment?.address || 'неизвестен'}`
+      this.notificationsClient.emit('accrual_upserted', {
+        periodLabel: data.periodLabel,
+        amountText: data.amountText,
+        statusText: data.statusText,
+        apartmentId: account.apartmentId
       });
     }
 
@@ -204,9 +206,9 @@ export class AccountantService {
     });
 
     if (!existing) {
-      const apartment = await this.prisma.apartment.findUnique({ where: { id: account.apartmentId } });
-      this.notificationsClient.emit('notify_accrual', {
-        message: `📄 <b>Доступна новая квитанция!</b>\n\nПериод: ${data.periodLabel}\nАдрес: ${apartment?.address || 'неизвестен'}`
+      this.notificationsClient.emit('invoice_available', {
+        periodLabel: data.periodLabel,
+        apartmentId: account.apartmentId
       });
     }
 
@@ -317,8 +319,19 @@ export class AccountantService {
   }
 
   async findApartmentById(id: number) {
-    const result = await this.prisma.apartment.findUnique({ where: { id }, include: { accounts: true } });
-    return this.serialize(result);
+    const apartment = await this.prisma.apartment.findUnique({
+      where: { id },
+      include: { accounts: true },
+    });
+    return this.serialize(apartment);
+  }
+
+  async findTenantByApartment(apartmentId: number) {
+    const tenant = await this.prisma.user.findFirst({
+      where: { tenantProfile: { apartmentId, status: 'active' } },
+      include: { identities: true }
+    });
+    return this.serialize(tenant);
   }
 
   async findInvoiceByPeriod(accountExternalId: string, period: string) {

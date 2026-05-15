@@ -20,4 +20,4 @@ COPY --from=builder /app/prisma ./prisma
 
 EXPOSE 3000
 
-CMD ["sh", "-c", "DIRECT_URL=$DATABASE_URL npx prisma migrate deploy && node dist/main.js"]
+CMD ["npm", "run", "start:prod"]
