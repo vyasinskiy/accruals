@@ -36,8 +36,8 @@ export class TenantController {
   }
 
   @MessagePattern('link_tenant_apartment')
-  async linkTenantApartment(@Payload() data: { tenantId: number; apartmentId: number }) {
-    return this.tenantRegistrationService.linkTenantApartment(data.tenantId, data.apartmentId);
+  async linkTenantApartment(@Payload() data: { tenantId: number; apartmentId: number; rentPaymentDay?: number; rentAmount?: number }) {
+    return this.tenantRegistrationService.linkTenantApartment(data.tenantId, data.apartmentId, data.rentPaymentDay, data.rentAmount);
   }
 
   @MessagePattern('add_tenant_payment')

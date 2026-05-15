@@ -8,10 +8,15 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 
 interface MyContext extends Context {
   session: {
-    state?: 'awaiting_registration_name' | 'awaiting_registration_phone' | 'awaiting_amount' | 'awaiting_photo';
+    state?: 'awaiting_registration_name' | 'awaiting_registration_phone' | 'awaiting_amount' | 'awaiting_photo' | 'awaiting_admin_rent_day' | 'awaiting_admin_rent_amount';
     amount?: number;
     regData?: {
       name?: string;
+    };
+    adminLinkData?: {
+      tenantId?: number;
+      apartmentId?: number;
+      rentPaymentDay?: number;
     };
   };
 }
@@ -145,6 +150,48 @@ export class TelegramBotInteractionService implements OnModuleInit {
         ctx.session.state = 'awaiting_photo';
         return ctx.reply('Пришлите фотографию чека/подтверждения:');
       }
+
+      if (ctx.session?.state === 'awaiting_admin_rent_day') {
+        const day = parseInt(ctx.message.text);
+        if (isNaN(day) || day < 1 || day > 31) {
+          return ctx.reply('Пожалуйста, введите корректный день месяца (от 1 до 31).');
+        }
+        if (!ctx.session.adminLinkData) ctx.session.adminLinkData = {};
+        ctx.session.adminLinkData.rentPaymentDay = day;
+        ctx.session.state = 'awaiting_admin_rent_amount';
+        return ctx.reply(`День оплаты: ${day}. Теперь введите сумму ежемесячной аренды (только число):`);
+      }
+
+      if (ctx.session?.state === 'awaiting_admin_rent_amount') {
+        const amount = parseFloat(ctx.message.text.replace(',', '.'));
+        if (isNaN(amount) || amount <= 0) {
+          return ctx.reply('Пожалуйста, введите корректную сумму (больше 0).');
+        }
+        
+        const linkData = ctx.session.adminLinkData;
+        if (!linkData || !linkData.tenantId || !linkData.apartmentId || !linkData.rentPaymentDay) {
+          ctx.session.state = undefined;
+          return ctx.reply('Ошибка сессии. Пожалуйста, начните привязку заново.');
+        }
+
+        try {
+          await firstValueFrom(this.accountantClient.send('link_tenant_apartment', { 
+            tenantId: linkData.tenantId, 
+            apartmentId: linkData.apartmentId,
+            rentPaymentDay: linkData.rentPaymentDay,
+            rentAmount: amount
+          }));
+          
+          ctx.session.state = undefined;
+          ctx.session.adminLinkData = undefined;
+          
+          return ctx.reply(`✅ Арендатор успешно привязан к квартире. Дата оплаты: ${linkData.rentPaymentDay}, Сумма: ${amount}`);
+        } catch (e) {
+          this.logger.error('Failed to link tenant', e);
+          return ctx.reply('Ошибка при привязке арендатора.');
+        }
+      }
+
       return next();
     });
 

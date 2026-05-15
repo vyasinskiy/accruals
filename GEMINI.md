@@ -20,9 +20,8 @@
 - Use Prisma for database interactions.
 - **Prisma Migrations**: Any change to `schema.prisma` MUST be accompanied by a generated migration file in the `prisma/migrations` folder. Use `npx prisma migrate dev --name <description>` during development to ensure the schema and database stay in sync and the migration is tracked in source control.
 - **Prisma Versioning**: Always use `npm run prisma:generate` or `npm run prisma:migrate` instead of `npx prisma`. This ensures the project stays on version 6.6.0 and avoids breaking changes introduced in Prisma 7.
-- **Prisma Monorepo Isolation**: To prevent TypeScript type conflicts across microservices (where generating a client for one service overwrites the generic `@prisma/client` used by another), the project uses NPM aliases.
-    - Each app defines a custom alias in `package.json` (e.g., `"@prisma/client-accountant": "npm:@prisma/client@6.6.0"`).
-    - The `schema.prisma` file explicitly outputs to this aliased path: `output = "../node_modules/@prisma/client-accountant"`.
-    - Services import their specific client using the alias: `import { PrismaClient } from '@prisma/client-accountant'`.
-    - *Crucial for Docker*: Standard `@prisma/client` must also be kept in `devDependencies` so the generator engine binaries are available during Docker builds on Alpine.
+- **Prisma Monorepo Isolation**: To prevent TypeScript type conflicts across microservices (where generating a client for one service overwrites the generic `@prisma/client` used by another), the project uses isolated internal clients.
+    - The `schema.prisma` file explicitly outputs to a local directory: `output = "../src/generated/client"`.
+    - Services import their specific client directly: `import { PrismaClient } from '../../generated/client'`.
+    - *Crucial for Docker*: Ensure `RUN mkdir -p src/generated/client/runtime` is present in Dockerfiles before `prisma generate` to prevent `ENOENT` copyfile bugs on Alpine.
 - Ensure all BigInt values are serialized correctly when passing through the message broker.

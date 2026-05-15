@@ -66,12 +66,32 @@ export class TelegramBotController {
   async handleTenantActivated(@Payload() data: { 
     chatId: string; 
     apartmentAddress?: string;
+    rentPaymentDay?: number;
+    rentAmount?: string;
   }) {
     let message = `✅ <b>Ваша регистрация подтверждена!</b>\n\n`;
     if (data.apartmentAddress) {
       message += `Администратор привязал вашу учетную запись к квартире: ${data.apartmentAddress}.\n`;
     }
-    message += `Теперь вы можете добавлять оплаты и просматривать квитанции.`;
+    if (data.rentPaymentDay && data.rentAmount) {
+      message += `📅 Дата оплаты: ${data.rentPaymentDay} число каждого месяца.\n`;
+      message += `💰 Сумма к оплате: ${data.rentAmount}\n`;
+    }
+    message += `\nТеперь вы можете добавлять оплаты и просматривать квитанции.`;
+
+    await this.botService.sendNotification(message, data.chatId);
+  }
+
+  @EventPattern('remind_rent_payment')
+  async handleRentReminder(@Payload() data: { 
+    chatId: string; 
+    rentAmount: string; 
+    apartmentAddress: string;
+  }) {
+    const message = `🔔 <b>Напоминание об оплате аренды!</b>\n\n` +
+      `Квартира: ${data.apartmentAddress}\n` +
+      `Сумма к оплате: ${data.rentAmount}\n\n` +
+      `Пожалуйста, не забудьте произвести оплату и отправить чек через бота (кнопка "Добавить оплату").`;
 
     await this.botService.sendNotification(message, data.chatId);
   }

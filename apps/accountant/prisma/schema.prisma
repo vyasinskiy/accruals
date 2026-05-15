@@ -1,6 +1,6 @@
 generator client {
   provider = "prisma-client-js"
-  output   = "../node_modules/@prisma/client-accountant"
+  output   = "../src/generated/client"
 }
 
 datasource db {
@@ -56,6 +56,7 @@ model Tenant {
   userId          Int       @unique @map("user_id")
   apartmentId     Int?      @map("apartment_id")
   rentPaymentDay  Int?      @map("rent_payment_day")
+  rentAmount      Decimal?  @db.Decimal(10, 2) @map("rent_amount")
   status          String    @default("pending") // pending, active, rejected
   createdAt       DateTime  @default(now()) @map("created_at")
 

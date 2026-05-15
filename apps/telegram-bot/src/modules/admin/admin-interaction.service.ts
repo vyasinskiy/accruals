@@ -142,14 +142,14 @@ export class AdminInteractionService {
     bot.action(/admin_confirm_link_(\d+)_(\d+)/, async (ctx) => {
       const tenantId = parseInt(ctx.match[1]);
       const apartmentId = parseInt(ctx.match[2]);
-      try {
-        await firstValueFrom(this.accountantClient.send('link_tenant_apartment', { tenantId, apartmentId }));
-        await ctx.editMessageText(`✅ Арендатор успешно привязан к квартире и активирован.`);
-        await ctx.answerCbQuery('Успешно');
-      } catch (e) {
-        this.logger.error('Failed to link tenant', e);
-        await ctx.answerCbQuery('Ошибка при привязке');
-      }
+      
+      const sessionCtx = ctx as any;
+      sessionCtx.session = sessionCtx.session || {};
+      sessionCtx.session.state = 'awaiting_admin_rent_day';
+      sessionCtx.session.adminLinkData = { tenantId, apartmentId };
+
+      await ctx.editMessageText(`Укажите день месяца для оплаты аренды (от 1 до 31):`, Markup.inlineKeyboard([]));
+      await ctx.answerCbQuery();
     });
 
     // Action: Reject Tenant

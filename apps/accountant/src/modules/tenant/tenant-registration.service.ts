@@ -107,11 +107,13 @@ export class TenantRegistrationService {
     return this.serialize(tenants);
   }
 
-  async linkTenantApartment(tenantId: number, apartmentId: number) {
+  async linkTenantApartment(tenantId: number, apartmentId: number, rentPaymentDay?: number, rentAmount?: number) {
     const tenant = await this.prisma.tenant.update({
       where: { id: tenantId },
       data: { 
         apartmentId,
+        rentPaymentDay,
+        rentAmount,
         status: 'active'
       },
       include: { user: { include: { identities: true } }, apartment: true }
@@ -122,7 +124,9 @@ export class TenantRegistrationService {
     if (tgIdentity) {
       this.notificationsClient.emit('tenant_activated', {
           chatId: tgIdentity.externalId,
-          apartmentAddress: tenant.apartment?.address || 'Неизвестно'
+          apartmentAddress: tenant.apartment?.address || 'Неизвестно',
+          rentPaymentDay,
+          rentAmount: rentAmount ? rentAmount.toString() : undefined
       });
     }
 

@@ -3,6 +3,7 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
 import { TenantController } from './tenant.controller';
 import { TenantRegistrationService } from './tenant-registration.service';
 import { TenantService } from './tenant.service';
+import { TenantReminderService } from './tenant-reminder.service';
 import { PrismaModule } from '../../common/prisma/prisma.module';
 import { config } from '../../common/config/config';
 
@@ -26,7 +27,9 @@ import { config } from '../../common/config/config';
   controllers: [TenantController],
   providers: [
     TenantRegistrationService,
-    TenantService
+    TenantService,
+    TenantReminderService
   ],
 })
 export class TenantModule {}
+
