@@ -17,7 +17,7 @@ RUN mkdir -p src/generated/client/runtime
 RUN npx prisma generate
 
 # Build TypeScript project
-RUN npm run build
+RUN npm run build && cp -a src/generated dist/
 
 # Start the application.
 # DB is pushed via deploy.sh or manually.

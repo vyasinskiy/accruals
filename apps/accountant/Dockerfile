@@ -8,7 +8,7 @@ RUN npm install
 COPY . .
 RUN mkdir -p src/generated/client/runtime
 RUN npx prisma generate
-RUN npm run build
+RUN npm run build && cp -a src/generated dist/
 
 FROM node:22-alpine
 
