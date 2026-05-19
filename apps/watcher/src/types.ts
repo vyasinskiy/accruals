@@ -30,6 +30,7 @@ export interface InvoiceSnapshot {
   accountExternalId: string;
   periodLabel: string;
   periodId: string;
+  amount?: number;
   invoiceUrl?: string;
   utilitiesUrl?: string;
   available: boolean;

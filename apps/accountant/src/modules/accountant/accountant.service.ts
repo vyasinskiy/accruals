@@ -186,6 +186,7 @@ export class AccountantService {
         accountExternalId: data.accountExternalId,
         periodId: data.periodId,
         periodLabel: data.periodLabel,
+        amount: data.amount,
         invoiceUrl: data.invoiceUrl,
         utilitiesUrl: data.utilitiesUrl,
         localFilePath: data.localFilePath,
@@ -197,6 +198,7 @@ export class AccountantService {
         lastSeenAt: new Date(),
       },
       update: {
+        amount: data.amount,
         invoiceUrl: data.invoiceUrl,
         utilitiesUrl: data.utilitiesUrl,
         localFilePath: data.localFilePath,
@@ -214,7 +216,45 @@ export class AccountantService {
       });
     }
 
+    // Trigger debt check
+    await this.checkAccountDebt(account.id);
+
     return { result: this.serialize(result), isNew: !existing };
+  }
+
+  private async checkAccountDebt(accountId: number) {
+    const account = await this.prisma.account.findUnique({
+      where: { id: accountId },
+      include: { apartment: true }
+    });
+
+    if (!account || !account.balance) return;
+
+    // We consider negative balance as debt (e.g. -6488.87 means 6488.87 is owed)
+    const debt = Math.abs(Number(account.balance));
+
+    // Find the latest invoice for this account to compare
+    const latestInvoice = await this.prisma.invoice.findFirst({
+      where: { accountId: account.id },
+      orderBy: { periodId: 'desc' }
+    });
+
+    if (!latestInvoice || !latestInvoice.amount) return;
+
+    const invoiceAmount = Math.abs(Number(latestInvoice.amount));
+    const threshold = invoiceAmount * 1.1; // 10% tolerance
+
+    if (debt > threshold) {
+      this.logger.warn(`DEBT WARNING for account ${account.externalId}: debt=${debt}, last_invoice=${invoiceAmount}`);
+      this.notificationsClient.emit('notify_debt_warning', {
+        accountExternalId: account.externalId,
+        accountLabel: account.accountLabel,
+        apartmentAddress: account.apartment?.address,
+        debt: debt.toFixed(2),
+        lastInvoiceAmount: invoiceAmount.toFixed(2),
+        periodLabel: latestInvoice.periodLabel
+      });
+    }
   }
 
   async createPayment(data: { telegramId: number | string; userName: string; amount: number; receiptPhotoId: string | null }) {
@@ -275,6 +315,14 @@ export class AccountantService {
     return this.serialize(result);
   }
 
+  async updateAccountCustomLabel(accountId: number, customLabel: string | null) {
+    const result = await this.prisma.account.update({
+      where: { id: accountId },
+      data: { customLabel },
+    });
+    return this.serialize(result);
+  }
+
   async findApartments(filters: { address?: string; organization?: string; externalId?: string }) {
     const where: any = {
       ...(filters.externalId ? { externalId: { contains: filters.externalId, mode: 'insensitive' } } : {}),
@@ -330,6 +378,7 @@ export class AccountantService {
     periodId?: string; 
     available?: boolean | string;
     uploadedToS3?: boolean | string;
+    take?: number | string;
   }) {
     const where: any = {
       ...(filters.accountId ? { accountId: Number(filters.accountId) } : {}),
@@ -352,7 +401,8 @@ export class AccountantService {
     const results = await this.prisma.invoice.findMany({ 
       where, 
       include: { account: { include: { apartment: true } } }, 
-      orderBy: [{ periodLabel: 'desc' }] 
+      orderBy: [{ periodId: 'desc' }],
+      ...(filters.take ? { take: Number(filters.take) } : {})
     });
     return this.serialize(results);
   }
@@ -371,6 +421,23 @@ export class AccountantService {
       include: { identities: true }
     });
     return this.serialize(tenant);
+  }
+
+  async findInvoiceById(id: number) {
+    const invoice = await this.prisma.invoice.findUnique({
+      where: { id },
+      include: { account: { include: { apartment: true } } }
+    });
+
+    if (!invoice) {
+      throw new NotFoundException(`Invoice ${id} not found`);
+    }
+
+    const parsedRaw = safeJsonParse<Record<string, unknown>>(invoice.rawJson);
+    const storageKey = parsedRaw?.s3Key as string || (isS3Key(invoice.localFilePath) ? invoice.localFilePath : null);
+    const downloadUrl = storageKey && this.s3Storage.isEnabled() ? this.s3Storage.getSignedDownloadUrl(storageKey) : null;
+
+    return this.serialize({ invoice, storageKey, downloadUrl });
   }
 
   async findInvoiceByPeriod(accountExternalId: string, period: string) {

@@ -40,13 +40,15 @@ describe('KvartplataAdapter Extraction Logic', () => {
     it('should extract accounts from nested payload with balance', () => {
       const payload = {
         accounts: [
-          { id: 'acc-1', number: '123', name: 'Water', balance: -100.50 },
-          { ls: 'acc-2', debt: '500,25' }
+          { id: 'acc-1', number: '123', serviceName: 'Utilities', balance: -100.50 },
+          { ls: 'acc-2', debt: '500,25', organizationName: 'TSJ' }
         ]
       };
       const result = extractAccounts(mockApartment, payload);
       expect(result).toHaveLength(2);
+      expect(result[0].accountLabel).toBe('Utilities');
       expect(result[0].balance).toBe(-100.50);
+      expect(result[1].accountLabel).toBe('TSJ');
       expect(result[1].balance).toBe(500.25);
     });
   });

@@ -130,10 +130,15 @@ export class KvartplataAdapter {
                 invoiceUrl.searchParams.set('AccountId', account.externalId);
                 invoiceUrl.searchParams.set('PeriodId', accrual.periodId);
                 
+                // Try to extract numeric amount from the accrual's raw data
+                const accrualData = JSON.parse(accrual.rawJson || '{}').accrual || {};
+                const amount = pickNumber(accrualData, ['amountToPay', 'AmountToPay', 'accruedAmount', 'AccruedAmount', 'amount', 'Amount', 'sum', 'Sum', 'value']);
+
                 invoices.push({
                     accountExternalId: account.externalId,
                     periodLabel: accrual.periodLabel,
                     periodId: accrual.periodId,
+                    amount,
                     invoiceUrl: invoiceUrl.toString(),
                     utilitiesUrl: undefined,
                     available: true,
@@ -142,7 +147,8 @@ export class KvartplataAdapter {
                         accountId: account.externalId,
                         apartmentExternalId: apartment.externalId,
                         periodId: accrual.periodId,
-                        invoiceUrl: invoiceUrl.toString()
+                        invoiceUrl: invoiceUrl.toString(),
+                        amount
                     })
                 });
             }
@@ -267,7 +273,7 @@ export function extractAccounts(apartment: ApartmentSnapshot, payload: unknown):
       externalId: accountId,
       apartmentExternalId: apartment.externalId,
       accountNumber: pickString(row, ['number', 'Number', 'accountNumber', 'AccountNumber', 'ls', 'personalAccount']) ?? accountId,
-      accountLabel: pickString(row, ['name', 'Name', 'caption', 'Caption', 'title', 'Title']),
+      accountLabel: pickString(row, ['serviceName', 'ServiceName', 'organizationName', 'OrganizationName', 'name', 'Name', 'caption', 'Caption', 'title', 'Title']),
       balance: pickNumber(row, ['balance', 'Balance', 'debt', 'Debt', 'value', 'Value']),
       rawJson: JSON.stringify({ apartment, account: row })
     });

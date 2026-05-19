@@ -8,11 +8,12 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 
 interface MyContext extends Context {
   session: {
-    state?: 'awaiting_registration_name' | 'awaiting_registration_phone' | 'awaiting_amount' | 'awaiting_photo' | 'awaiting_admin_rent_day' | 'awaiting_admin_rent_amount' | 'admin_editing_rent_day' | 'admin_editing_rent_amount';
+    state?: 'awaiting_registration_name' | 'awaiting_registration_phone' | 'awaiting_amount' | 'awaiting_photo' | 'awaiting_admin_rent_day' | 'awaiting_admin_rent_amount' | 'admin_editing_rent_day' | 'admin_editing_rent_amount' | 'admin_editing_acc_label';
     amount?: number;
     paymentTargetTelegramId?: string;
     editTenantId?: number;
     editApartmentId?: number;
+    editAccountId?: number;
     regData?: {
       name?: string;
     };
@@ -282,6 +283,32 @@ export class TelegramBotInteractionService implements OnModuleInit {
         } catch (e) {
           this.logger.error('Failed to update rent amount', e);
           return ctx.reply('Ошибка при обновлении суммы аренды.');
+        }
+      }
+
+      if (ctx.session?.state === 'admin_editing_acc_label') {
+        const label = ctx.message.text.trim();
+        try {
+          await firstValueFrom(this.accountantClient.send('update_account_custom_label', { 
+            accountId: ctx.session.editAccountId, 
+            customLabel: label 
+          }));
+          const aptId = ctx.session.editApartmentId;
+          const accId = ctx.session.editAccountId;
+          ctx.session.state = undefined;
+          ctx.session.editAccountId = undefined;
+          ctx.session.editApartmentId = undefined;
+          
+          await ctx.reply(`✅ Название аккаунта успешно изменено на "${label}".`);
+          if (aptId && accId) {
+            await this.adminInteractionService.showAccountMenu(ctx, accId, aptId);
+          } else if (aptId) {
+            await this.adminInteractionService.showApartmentMenu(ctx, aptId);
+          }
+          return;
+        } catch (e) {
+          this.logger.error('Failed to update account label', e);
+          return ctx.reply('Ошибка при обновлении названия аккаунта.');
         }
       }
 

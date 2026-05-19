@@ -76,6 +76,16 @@ export class AccountantController {
     return this.accountantService.findInvoices(query);
   }
 
+  @MessagePattern('get_invoices')
+  async getInvoices(@Payload() query: any = {}) {
+    return this.accountantService.findInvoices(query);
+  }
+
+  @MessagePattern('get_invoice')
+  async getInvoice(@Payload() id: number) {
+    return this.accountantService.findInvoiceById(id);
+  }
+
   @Get('invoices/by-period')
   async getInvoiceByPeriod(@Query('accountExternalId') accountExternalId: string, @Query('period') period: string) {
     return this.accountantService.findInvoiceByPeriod(accountExternalId, period);
@@ -107,6 +117,11 @@ export class AccountantController {
   @MessagePattern('update_tenant_payment_settings')
   async updateTenantPaymentSettings(@Payload() data: { tenantId: number; rentPaymentDay?: number; rentAmount?: number }) {
     return this.accountantService.updateTenantPaymentSettings(data.tenantId, data.rentPaymentDay, data.rentAmount);
+  }
+
+  @MessagePattern('update_account_custom_label')
+  async updateAccountCustomLabel(@Payload() data: { accountId: number; customLabel: string | null }) {
+    return this.accountantService.updateAccountCustomLabel(data.accountId, data.customLabel);
   }
 
   @Get('apartments/:id')

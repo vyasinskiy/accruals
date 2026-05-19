@@ -32,6 +32,7 @@ describe('AccountantService', () => {
       findUnique: jest.fn(),
       upsert: jest.fn(),
       findMany: jest.fn(),
+      findFirst: jest.fn(),
     },
   };
 
@@ -141,6 +142,37 @@ describe('AccountantService', () => {
       await service.upsertAccrual(dto);
 
       expect(notificationsClient.emit).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('upsertInvoice', () => {
+    it('should NOT emit debt warning if debt is within 10% threshold', async () => {
+      const dto = { accountExternalId: 'acc-1', periodId: '202605', amount: 6000 };
+      mockPrisma.account.findUnique.mockResolvedValue({ id: 10, externalId: 'acc-1', balance: -6500 }); // Debt is 6500
+      mockPrisma.invoice.findUnique.mockResolvedValue({ id: 200 }); // Existing
+      mockPrisma.invoice.upsert.mockResolvedValue({ id: 200, ...dto });
+      mockPrisma.invoice.findFirst.mockResolvedValue({ id: 200, amount: 6000, periodLabel: 'May 2026' });
+
+      await service.upsertInvoice(dto);
+
+      // 6500 < 6000 * 1.1 (6600) -> No warning
+      expect(notificationsClient.emit).not.toHaveBeenCalledWith('notify_debt_warning', expect.any(Object));
+    });
+
+    it('should emit debt warning if debt exceeds 10% threshold', async () => {
+      const dto = { accountExternalId: 'acc-1', periodId: '202605', amount: 6000 };
+      mockPrisma.account.findUnique.mockResolvedValue({ id: 10, externalId: 'acc-1', balance: -7000, apartment: { address: 'Test St' } }); // Debt is 7000
+      mockPrisma.invoice.findUnique.mockResolvedValue(null); // New
+      mockPrisma.invoice.upsert.mockResolvedValue({ id: 200, ...dto });
+      mockPrisma.invoice.findFirst.mockResolvedValue({ id: 200, amount: 6000, periodLabel: 'May 2026' });
+
+      await service.upsertInvoice(dto);
+
+      // 7000 > 6000 * 1.1 (6600) -> Warning
+      expect(notificationsClient.emit).toHaveBeenCalledWith('notify_debt_warning', expect.objectContaining({
+        debt: '7000.00',
+        lastInvoiceAmount: '6000.00'
+      }));
     });
   });
 
