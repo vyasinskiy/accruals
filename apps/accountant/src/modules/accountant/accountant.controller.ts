@@ -114,6 +114,11 @@ export class AccountantController {
     return this.accountantService.findTenantByApartment(apartmentId);
   }
 
+  @MessagePattern('get_all_users')
+  async getAllUsers() {
+    return this.accountantService.findAllUsers();
+  }
+
   @MessagePattern('update_tenant_payment_settings')
   async updateTenantPaymentSettings(@Payload() data: { tenantId: number; rentPaymentDay?: number; rentAmount?: number }) {
     return this.accountantService.updateTenantPaymentSettings(data.tenantId, data.rentPaymentDay, data.rentAmount);
@@ -122,6 +127,11 @@ export class AccountantController {
   @MessagePattern('update_account_custom_label')
   async updateAccountCustomLabel(@Payload() data: { accountId: number; customLabel: string | null }) {
     return this.accountantService.updateAccountCustomLabel(data.accountId, data.customLabel);
+  }
+
+  @MessagePattern('create_active_tenant_manual')
+  async createActiveTenantManual(@Payload() data: { name: string; apartmentId: number; rentPaymentDay: number; rentAmount: number }) {
+    return this.accountantService.createActiveTenantManual(data);
   }
 
   @Get('apartments/:id')

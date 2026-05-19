@@ -1,9 +1,10 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
-import { Telegraf, Markup } from 'telegraf';
+import { Telegraf, Markup, Context } from 'telegraf';
 import { ClientProxy } from '@nestjs/microservices';
 import { firstValueFrom } from 'rxjs';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { config } from '../../common/config/config';
+import { Apartment, Account, User, Invoice } from './types';
 
 @Injectable()
 export class AdminInteractionService {
@@ -14,16 +15,16 @@ export class AdminInteractionService {
     private readonly prisma: PrismaService
   ) {}
 
-  getAccountDisplayName(acc: any) {
+  getAccountDisplayName(acc: Account) {
     if (acc.customLabel) return acc.customLabel;
     const fallback = [acc.accountNumber, acc.accountLabel].filter(Boolean).join(' ');
     return fallback || acc.externalId;
   }
 
-  async showApartmentMenu(ctx: any, apartmentId: number) {
+  async showApartmentMenu(ctx: Context, apartmentId: number) {
     try {
-      const apartments = await firstValueFrom(this.accountantClient.send('get_apartments', { id: apartmentId }));
-      const apt = apartments.find((a: any) => a.id === apartmentId);
+      const apartments = await firstValueFrom(this.accountantClient.send<Apartment[]>('get_apartments', { id: apartmentId }));
+      const apt = apartments.find((a) => a.id === apartmentId);
       if (!apt) return ctx.reply('Квартира не найдена.');
 
       const tenant = apt.tenants?.[0];
@@ -34,7 +35,7 @@ export class AdminInteractionService {
       let lastUpdate: Date | null = null;
 
       if (apt.accounts && apt.accounts.length > 0) {
-        const totalBalance = apt.accounts.reduce((sum: number, acc: any) => {
+        const totalBalance = apt.accounts.reduce((sum: number, acc) => {
           if (acc.lastSeenAt) {
             const date = new Date(acc.lastSeenAt);
             if (!lastUpdate || date > lastUpdate) lastUpdate = date;
@@ -50,7 +51,7 @@ export class AdminInteractionService {
           debtInfo = `⚪️ <b>Баланс: 0.00</b>\n`;
         }
         
-        apt.accounts.forEach((acc: any) => {
+        apt.accounts.forEach((acc) => {
           const bal = Number(acc.balance || 0);
           const label = bal < 0 ? 'Задолженность' : (bal > 0 ? 'Переплата' : 'Баланс');
           const displayName = this.getAccountDisplayName(acc);
@@ -95,14 +96,14 @@ export class AdminInteractionService {
     }
   }
 
-  async showAccountsList(ctx: any, apartmentId: number) {
+  async showAccountsList(ctx: Context, apartmentId: number) {
     try {
-      const apartments = await firstValueFrom(this.accountantClient.send('get_apartments', { id: apartmentId }));
-      const apt = apartments.find((a: any) => a.id === apartmentId);
+      const apartments = await firstValueFrom(this.accountantClient.send<Apartment[]>('get_apartments', { id: apartmentId }));
+      const apt = apartments.find((a) => a.id === apartmentId);
       if (!apt) return ctx.reply('Квартира не найдена.');
 
       const message = `💳 <b>Аккаунты квартиры: ${apt.address}</b>\nВыберите аккаунт для управления:`;
-      const buttons = (apt.accounts || []).map((acc: any) => {
+      const buttons = (apt.accounts || []).map((acc) => {
         const label = this.getAccountDisplayName(acc);
         return [
           Markup.button.callback(label, `admin_account_menu_${acc.id}_${apt.id}`)
@@ -110,21 +111,23 @@ export class AdminInteractionService {
       });
       buttons.push([Markup.button.callback('↩️ Назад к квартире', `admin_apt_menu_${apt.id}`)]);
 
-      await ctx.editMessageText(message, {
+      await (ctx as any).editMessageText(message, {
         parse_mode: 'HTML',
         ...Markup.inlineKeyboard(buttons)
       });
     } catch (e) {
       this.logger.error('Failed to show accounts list', e);
-      await ctx.answerCbQuery('Ошибка загрузки списка аккаунтов');
+      await (ctx as any).answerCbQuery('Ошибка загрузки списка аккаунтов');
     }
   }
 
-  async showAccountMenu(ctx: any, accountId: number, apartmentId: number) {
+  async showAccountMenu(ctx: Context, accountId: number, apartmentId: number) {
     try {
-      const apartments = await firstValueFrom(this.accountantClient.send('get_apartments', { id: apartmentId }));
-      const apt = apartments.find((a: any) => a.id === apartmentId);
-      const acc = apt?.accounts?.find((a: any) => a.id === accountId);
+      const apartments = await firstValueFrom(this.accountantClient.send<Apartment[]>('get_apartments', { id: apartmentId }));
+      const apt = apartments.find((a) => a.id === apartmentId);
+      if (!apt) return ctx.reply('Квартира не найдена.');
+
+      const acc = apt.accounts?.find((a) => a.id === accountId);
       if (!acc) return ctx.reply('Аккаунт не найден.');
 
       const displayName = this.getAccountDisplayName(acc);
@@ -142,95 +145,96 @@ export class AdminInteractionService {
         [Markup.button.callback('↩️ Назад к списку аккаунтов', `admin_manage_accounts_${apt.id}`)]
       ];
 
-      await ctx.editMessageText(message, {
+      await (ctx as any).editMessageText(message, {
         parse_mode: 'HTML',
         ...Markup.inlineKeyboard(buttons)
       });
     } catch (e) {
       this.logger.error('Failed to show account menu', e);
-      await ctx.answerCbQuery('Ошибка загрузки меню аккаунта');
+      await (ctx as any).answerCbQuery('Ошибка загрузки меню аккаунта');
     }
   }
 
-  async showAccountInvoices(ctx: any, accountId: number, apartmentId: number) {
+  async showAccountInvoices(ctx: Context, accountId: number, apartmentId: number) {
     try {
-      const apartments = await firstValueFrom(this.accountantClient.send('get_apartments', { id: apartmentId }));
-      const apt = apartments.find((a: any) => a.id === apartmentId);
-      const acc = apt?.accounts?.find((a: any) => a.id === accountId);
+      const apartments = await firstValueFrom(this.accountantClient.send<Apartment[]>('get_apartments', { id: apartmentId }));
+      const apt = apartments.find((a) => a.id === apartmentId);
+      if (!apt) return ctx.reply('Квартира не найдена.');
+
+      const acc = apt.accounts?.find((a) => a.id === accountId);
       if (!acc) return ctx.reply('Аккаунт не найден.');
 
       const displayName = this.getAccountDisplayName(acc);
-      const invoices = await firstValueFrom(this.accountantClient.send('get_invoices', { accountId, take: 12 }));
+      const invoices = await firstValueFrom(this.accountantClient.send<Invoice[]>('get_invoices', { accountId, take: 12 }));
       
       const message = `📄 <b>Последние инвойсы: ${displayName}</b>\nВыберите период для получения ссылки:`;
       
-      const buttons = (invoices || []).map((inv: any) => [
+      const buttons = (invoices || []).map((inv) => [
         Markup.button.callback(inv.periodLabel, `admin_get_invoice_${inv.id}`)
       ]);
       buttons.push([Markup.button.callback('↩️ Назад к аккаунту', `admin_account_menu_${accountId}_${apartmentId}`)]);
 
-      await ctx.editMessageText(message, {
+      await (ctx as any).editMessageText(message, {
         parse_mode: 'HTML',
         ...Markup.inlineKeyboard(buttons)
       });
     } catch (e) {
       this.logger.error('Failed to show account invoices', e);
-      await ctx.answerCbQuery('Ошибка загрузки списка инвойсов');
+      await (ctx as any).answerCbQuery('Ошибка загрузки списка инвойсов');
+    }
+  }
+
+  async listApartments(ctx: Context) {
+    try {
+      const apartments = await firstValueFrom(this.accountantClient.send<Apartment[]>('get_apartments', {}));
+      if (!apartments || apartments.length === 0) {
+        return ctx.reply('Квартиры не найдены.');
+      }
+
+      await ctx.reply('🏠 <b>Выберите квартиру:</b>', {
+        parse_mode: 'HTML',
+        ...Markup.inlineKeyboard(
+          apartments.map((apt) => [Markup.button.callback(apt.address || apt.externalId, `admin_apt_menu_${apt.id}`)])
+        )
+      });
+    } catch (e) {
+      this.logger.error('Failed to list apartments', e);
+      await ctx.reply('Ошибка загрузки списка квартир.');
     }
   }
 
   registerHandlers(bot: Telegraf<any>) {
-    // Admin Menu - Show Pending Tenants AND Apartments
+    // Admin Menu - Show Apartments
     bot.hears('Админ Меню', async (ctx) => {
-      try {
-        const user = await this.prisma.user.findUnique({ where: { telegramId: BigInt(ctx.from.id) } });
-        if (!user || user.role !== 'admin') {
-          return ctx.reply('Нет доступа.');
-        }
+      await this.listApartments(ctx);
+    });
 
-        // 1. Pending Tenants
-        const pendingTenants = await firstValueFrom(this.accountantClient.send('get_pending_tenants', {}));
-        if (pendingTenants && pendingTenants.length > 0) {
-          await ctx.reply(`📝 <b>Заявки на регистрацию (${pendingTenants.length}):</b>`, { parse_mode: 'HTML' });
-          for (const tenant of pendingTenants) {
-             await ctx.reply(`Заявка от: ${tenant.user?.name || 'Неизвестно'}\nТелефон: ${tenant.phone || 'Неизвестно'}\nID: ${tenant.id}`, Markup.inlineKeyboard([
-               Markup.button.callback('Привязать к квартире', `admin_link_tenant_${tenant.id}`),
-               Markup.button.callback('❌ Отклонить', `admin_reject_tenant_${tenant.id}`)
-             ]));
-          }
-        } else {
-          await ctx.reply('📝 Нет заявок на регистрацию в ожидании.');
-        }
-
-        // 2. Apartments List button
-        await ctx.reply('🏠 <b>Управление квартирами</b>\nНажмите кнопку ниже, чтобы просмотреть список квартир и их настройки:', {
-          parse_mode: 'HTML',
-          ...Markup.inlineKeyboard([
-            [Markup.button.callback('📂 Список квартир', 'admin_list_apartments')]
-          ])
-        });
-
-      } catch (e) {
-        this.logger.error('Failed to open admin menu', e);
-        ctx.reply('Произошла ошибка. Попробуйте позже.');
-      }
+    bot.hears('Список квартир', async (ctx) => {
+      await this.listApartments(ctx);
     });
 
     // Action: List Apartments
     bot.action('admin_list_apartments', async (ctx) => {
       try {
-        const apartments = await firstValueFrom(this.accountantClient.send('get_apartments', {}));
+        const apartments = await firstValueFrom(this.accountantClient.send<Apartment[]>('get_apartments', {}));
         if (!apartments || apartments.length === 0) {
           return ctx.answerCbQuery('Квартиры не найдены.');
         }
 
         await ctx.answerCbQuery();
-        await ctx.reply('🏠 <b>Выберите квартиру:</b>', {
-          parse_mode: 'HTML',
-          ...Markup.inlineKeyboard(
-            apartments.map((apt: any) => [Markup.button.callback(apt.address || apt.externalId, `admin_apt_menu_${apt.id}`)])
-          )
-        });
+        const buttons = apartments.map((apt) => [Markup.button.callback(apt.address || apt.externalId, `admin_apt_menu_${apt.id}`)]);
+        
+        if (ctx.callbackQuery) {
+          await ctx.editMessageText('🏠 <b>Выберите квартиру:</b>', {
+            parse_mode: 'HTML',
+            ...Markup.inlineKeyboard(buttons)
+          });
+        } else {
+          await ctx.reply('🏠 <b>Выберите квартиру:</b>', {
+            parse_mode: 'HTML',
+            ...Markup.inlineKeyboard(buttons)
+          });
+        }
       } catch (e) {
         this.logger.error('Failed to list apartments', e);
         await ctx.answerCbQuery('Ошибка загрузки списка.');
@@ -271,7 +275,7 @@ export class AdminInteractionService {
     bot.action(/admin_get_invoice_(\d+)/, async (ctx) => {
       const invoiceId = parseInt(ctx.match[1]);
       try {
-        const { invoice, downloadUrl } = await firstValueFrom(this.accountantClient.send('get_invoice', invoiceId));
+        const { invoice, downloadUrl } = await firstValueFrom(this.accountantClient.send<{ invoice: Invoice, downloadUrl: string }>('get_invoice', invoiceId));
         if (!downloadUrl) {
           return ctx.answerCbQuery('PDF инвойса не найден в S3', { show_alert: true });
         }
@@ -296,16 +300,16 @@ export class AdminInteractionService {
     bot.action(/admin_check_debt_(\d+)/, async (ctx) => {
       const apartmentId = parseInt(ctx.match[1]);
       try {
-        const apartments = await firstValueFrom(this.accountantClient.send('get_apartments', { id: apartmentId }));
-        const apt = apartments.find((a: any) => a.id === apartmentId);
+        const apartments = await firstValueFrom(this.accountantClient.send<Apartment[]>('get_apartments', { id: apartmentId }));
+        const apt = apartments.find((a) => a.id === apartmentId);
         if (!apt) return ctx.answerCbQuery('Квартира не найдена.');
 
         let debtInfo = `🔍 <b>Проверка задолженности: ${apt.address}</b>\n\n`;
         let lastUpdate: Date | null = null;
-        const invoicesToSend: any[] = [];
+        const invoicesToSend: { displayName: string, periodLabel: string, url: string, filename: string }[] = [];
 
         if (apt.accounts && apt.accounts.length > 0) {
-          const totalBalance = apt.accounts.reduce((sum: number, acc: any) => {
+          const totalBalance = apt.accounts.reduce((sum: number, acc) => {
             if (acc.lastSeenAt) {
               const date = new Date(acc.lastSeenAt);
               if (!lastUpdate || date > lastUpdate) lastUpdate = date;
@@ -330,9 +334,9 @@ export class AdminInteractionService {
             // If there is debt, collect latest invoice link
             if (bal < 0) {
               try {
-                const invoices = await firstValueFrom(this.accountantClient.send('get_invoices', { accountId: acc.id, take: 1 }));
+                const invoices = await firstValueFrom(this.accountantClient.send<Invoice[]>('get_invoices', { accountId: acc.id, take: 1 }));
                 if (invoices && invoices.length > 0) {
-                  const { downloadUrl } = await firstValueFrom(this.accountantClient.send('get_invoice', invoices[0].id));
+                  const { downloadUrl } = await firstValueFrom(this.accountantClient.send<{ downloadUrl: string }>('get_invoice', invoices[0].id));
                   if (downloadUrl) {
                     invoicesToSend.push({
                       displayName,
@@ -417,59 +421,168 @@ export class AdminInteractionService {
       await ctx.answerCbQuery();
     });
 
-    // User Management - List All Users from local Bot DB
+    // User Management - Main Entry Menu
     bot.hears('Управление пользователями', async (ctx) => {
       try {
-        const user = await this.prisma.user.findUnique({ where: { telegramId: BigInt(ctx.from.id) } });
-        if (!user || user.role !== 'admin') {
-          return ctx.reply('Нет доступа.');
-        }
-
-        const users = await this.prisma.user.findMany({ orderBy: { createdAt: 'desc' } });
-        if (!users || users.length === 0) {
-          return ctx.reply('Пользователей не найдено в базе бота.');
-        }
-
-        let allAccUsers: any[] = [];
-        try {
-          allAccUsers = await firstValueFrom(this.accountantClient.send('get_all_users', {}));
-        } catch (e) {
-          this.logger.warn('Could not fetch users from accountant for addresses');
-        }
-
-        const addressMap = new Map<string, string>();
-        if (Array.isArray(allAccUsers)) {
-          for (const accUser of allAccUsers) {
-            const tgIdentity = accUser.identities?.find((i: any) => i.platform === 'telegram');
-            const address = accUser.tenantProfile?.apartment?.address;
-            if (tgIdentity && address) {
-              addressMap.set(tgIdentity.externalId.toString(), address);
-            }
-          }
-        }
-
-        for (const u of users) {
-           const roleStr = u.role === 'admin' ? '(Админ)' : '(Арендатор)';
-           const name = [u.firstName, u.lastName].filter(Boolean).join(' ') || u.username || 'Неизвестно';
-           const isSuperAdmin = u.telegramId.toString() === config.SUPER_ADMIN_TELEGRAM_ID;
-
-           const address = addressMap.get(u.telegramId.toString());
-           const displayInfo = address ? `Квартира: ${address}` : `TG ID: ${u.telegramId}`;
-
-           const buttons = [];
-           if (!isSuperAdmin) {
-             buttons.push(Markup.button.callback('❌ Удалить', `admin_delete_user_${u.id}`));
-           }
-           
-           await ctx.reply(`👤 <b>${name}</b> ${roleStr}\n${displayInfo}`, {
-             parse_mode: 'HTML',
-             ...(buttons.length > 0 ? Markup.inlineKeyboard(buttons) : {})
-           });
-        }
+        await ctx.reply('👤 <b>Управление пользователями</b>\nВыберите действие:', {
+            parse_mode: 'HTML',
+            ...Markup.inlineKeyboard([
+                [Markup.button.callback('📋 Список пользователей', 'admin_list_users')],
+                [Markup.button.callback('➕ Добавить нового пользователя', 'admin_add_user_start')]
+            ])
+        });
       } catch (e) {
-        this.logger.error('Failed to get users from local DB', e);
-        ctx.reply('Произошла ошибка при загрузке пользователей.');
+        this.logger.error('Failed to show user management menu', e);
+        ctx.reply('Произошла ошибка при загрузке меню.');
       }
+    });
+
+    // Action: List Users (Interactive buttons)
+    bot.action('admin_list_users', async (ctx) => {
+      try {
+        let allAccUsers: User[] = [];
+        try {
+          allAccUsers = await firstValueFrom(this.accountantClient.send<User[]>('get_all_users', {}));
+        } catch (e) {
+          this.logger.error('Could not fetch users from accountant', e);
+          return ctx.answerCbQuery('Ошибка связи с основным сервисом');
+        }
+
+        if (!allAccUsers || allAccUsers.length === 0) {
+          return ctx.editMessageText('👤 Пользователей не найдено в системе.', {
+            ...Markup.inlineKeyboard([[Markup.button.callback('↩️ Назад', 'admin_user_mgmt_back')]])
+          });
+        }
+
+        await ctx.answerCbQuery();
+        
+        const message = '📋 <b>Список пользователей:</b>\nВыберите пользователя для управления:';
+        const buttons = allAccUsers.map((u) => {
+           const tgIdentity = u.identities?.find((i) => i.platform === 'telegram');
+           const tgId = tgIdentity?.externalId;
+           const roleStr = u.role === 'admin' ? '🛡' : '👤';
+           const name = u.name || (tgId ? `ID:${tgId}` : 'Неизвестно');
+           
+           return [Markup.button.callback(`${roleStr} ${name}`, `admin_user_menu_${u.id}`)];
+        });
+        
+        buttons.push([Markup.button.callback('↩️ Назад к управлению', 'admin_user_mgmt_back')]);
+
+        await ctx.editMessageText(message, {
+          parse_mode: 'HTML',
+          ...Markup.inlineKeyboard(buttons)
+        });
+      } catch (e) {
+        this.logger.error('Failed to list users', e);
+        await ctx.answerCbQuery('Ошибка при формировании списка');
+      }
+    });
+
+    // Action: User Details Menu
+    bot.action(/admin_user_menu_(\d+)/, async (ctx) => {
+        const userId = parseInt(ctx.match[1]);
+        try {
+            const allAccUsers = await firstValueFrom(this.accountantClient.send<User[]>('get_all_users', {}));
+            const u = allAccUsers.find(user => user.id === userId);
+            if (!u) return ctx.answerCbQuery('Пользователь не найден');
+
+            const tgIdentity = u.identities?.find((i) => i.platform === 'telegram');
+            const tgId = tgIdentity?.externalId;
+            const roleStr = u.role === 'admin' ? 'Администратор' : 'Арендатор';
+            const isSuperAdmin = tgId === config.SUPER_ADMIN_TELEGRAM_ID;
+
+            const address = u.tenantProfile?.apartment?.address;
+            const displayInfo = address ? `🏠 Квартира: ${address}` : (tgId ? `🆔 TG ID: ${tgId}` : '❌ Нет привязки к TG');
+
+            const message = `👤 <b>Пользователь: ${u.name || 'Без имени'}</b>\n` +
+                `🔹 Роль: ${roleStr}\n` +
+                `🔹 Статус: ${u.tenantProfile?.status || 'N/A'}\n` +
+                `${displayInfo}`;
+
+            const buttons = [];
+            // If they have a tenant profile, allow editing settings
+            if (u.tenantProfile) {
+                buttons.push([Markup.button.callback('📅 Изменить день оплаты', `admin_edit_rent_day_${u.tenantProfile.id}_${u.tenantProfile.apartmentId || 0}`)]);
+                buttons.push([Markup.button.callback('💰 Изменить сумму аренды', `admin_edit_rent_amount_${u.tenantProfile.id}_${u.tenantProfile.apartmentId || 0}`)]);
+            }
+
+            if (!isSuperAdmin) {
+                buttons.push([Markup.button.callback('❌ Удалить пользователя', `admin_confirm_delete_full_${u.id}`)]);
+            }
+            
+            buttons.push([Markup.button.callback('↩️ Назад к списку', 'admin_list_users')]);
+
+            await ctx.editMessageText(message, {
+                parse_mode: 'HTML',
+                ...Markup.inlineKeyboard(buttons)
+            });
+            await ctx.answerCbQuery();
+        } catch (e) {
+            this.logger.error('Failed to show user menu', e);
+            await ctx.answerCbQuery('Ошибка загрузки данных пользователя');
+        }
+    });
+
+    // Action: Confirm Full User Deletion
+    bot.action(/admin_confirm_delete_full_(\d+)/, async (ctx) => {
+        const userId = parseInt(ctx.match[1]);
+        await ctx.editMessageReplyMarkup(Markup.inlineKeyboard([
+            [Markup.button.callback('⚠️ Подтвердить удаление', `admin_execute_delete_full_${userId}`)],
+            [Markup.button.callback('↩️ Отмена', `admin_user_menu_${userId}`)]
+        ]).reply_markup);
+        await ctx.answerCbQuery();
+    });
+
+    // Action: Execute Full User Deletion
+    bot.action(/admin_execute_delete_full_(\d+)/, async (ctx) => {
+        const userId = parseInt(ctx.match[1]);
+        try {
+            await firstValueFrom(this.accountantClient.send('delete_user', { userId }));
+            await ctx.answerCbQuery('Пользователь удален');
+            
+            // Show simple confirmation with button to go back to list
+            await ctx.editMessageText('✅ Пользователь удален из системы.', {
+                ...Markup.inlineKeyboard([[Markup.button.callback('📋 Вернуться к списку', 'admin_list_users')]])
+            });
+        } catch (e) {
+            this.logger.error('Failed to delete user', e);
+            await ctx.answerCbQuery('Ошибка при удалении');
+        }
+    });
+
+    // Action: Back to User Management
+    bot.action('admin_user_mgmt_back', async (ctx) => {
+        await ctx.editMessageText('👤 <b>Управление пользователями</b>\nВыберите действие:', {
+            parse_mode: 'HTML',
+            ...Markup.inlineKeyboard([
+                [Markup.button.callback('📋 Список пользователей', 'admin_list_users')],
+                [Markup.button.callback('➕ Добавить нового пользователя', 'admin_add_user_start')]
+            ])
+        });
+        await ctx.answerCbQuery();
+    });
+
+    // Action: Start Add User
+    bot.action('admin_add_user_start', async (ctx) => {
+      const sessionCtx = ctx as any;
+      sessionCtx.session = sessionCtx.session || {};
+      sessionCtx.session.state = 'admin_adding_user_name';
+      sessionCtx.session.adminAddingUserData = {};
+
+      await ctx.editMessageText('Введите имя и фамилию нового пользователя:', Markup.inlineKeyboard([]));
+      await ctx.answerCbQuery();
+    });
+
+    // Action: Select Apartment for New User
+    bot.action(/admin_add_user_apt_(\d+)/, async (ctx) => {
+      const apartmentId = parseInt(ctx.match[1]);
+      const sessionCtx = ctx as any;
+      if (sessionCtx.session?.adminAddingUserData) {
+        sessionCtx.session.adminAddingUserData.apartmentId = apartmentId;
+        sessionCtx.session.state = 'admin_adding_user_rent_day';
+        await ctx.editMessageText('Введите день месяца для оплаты (1-31):', Markup.inlineKeyboard([]));
+      }
+      await ctx.answerCbQuery();
     });
 
     // Action: Confirm Delete User (Step 1)
@@ -515,51 +628,6 @@ export class AdminInteractionService {
       } catch (e) {
         this.logger.error('Failed to delete user', e);
         await ctx.answerCbQuery('Ошибка при удалении пользователя');
-      }
-    });
-
-    // Action: Link Tenant to Apartment (Step 1: List Apartments)
-    bot.action(/admin_link_tenant_(\d+)/, async (ctx) => {
-      const tenantId = parseInt(ctx.match[1]);
-      try {
-        const apartments = await firstValueFrom(this.accountantClient.send('get_apartments', {}));
-        if (!apartments || apartments.length === 0) {
-          return ctx.answerCbQuery('Нет доступных квартир в базе.', { show_alert: true });
-        }
-
-        const buttons = apartments.map((apt: any) => [Markup.button.callback(apt.address || apt.externalId, `admin_confirm_link_${tenantId}_${apt.id}`)]);
-        
-        await ctx.editMessageText('Выберите квартиру для привязки:', Markup.inlineKeyboard(buttons));
-      } catch (e) {
-        this.logger.error('Failed to get apartments', e);
-        await ctx.answerCbQuery('Ошибка загрузки квартир');
-      }
-    });
-
-    // Action: Confirm Linking (Step 2)
-    bot.action(/admin_confirm_link_(\d+)_(\d+)/, async (ctx) => {
-      const tenantId = parseInt(ctx.match[1]);
-      const apartmentId = parseInt(ctx.match[2]);
-      
-      const sessionCtx = ctx as any;
-      sessionCtx.session = sessionCtx.session || {};
-      sessionCtx.session.state = 'awaiting_admin_rent_day';
-      sessionCtx.session.adminLinkData = { tenantId, apartmentId };
-
-      await ctx.editMessageText(`Укажите день месяца для оплаты аренды (от 1 до 31):`, Markup.inlineKeyboard([]));
-      await ctx.answerCbQuery();
-    });
-
-    // Action: Reject Tenant
-    bot.action(/admin_reject_tenant_(\d+)/, async (ctx) => {
-      const tenantId = parseInt(ctx.match[1]);
-      try {
-        await firstValueFrom(this.accountantClient.send('reject_tenant', { tenantId }));
-        await ctx.editMessageText(`❌ Заявка на регистрацию отклонена.`);
-        await ctx.answerCbQuery('Заявка отклонена');
-      } catch (e) {
-        this.logger.error('Failed to reject tenant', e);
-        await ctx.answerCbQuery('Ошибка при отклонении');
       }
     });
 

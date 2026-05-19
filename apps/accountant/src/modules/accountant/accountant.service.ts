@@ -323,6 +323,25 @@ export class AccountantService {
     return this.serialize(result);
   }
 
+  async createActiveTenantManual(data: { name: string; apartmentId: number; rentPaymentDay: number; rentAmount: number }) {
+    const user = await this.prisma.user.create({
+      data: {
+        name: data.name,
+        role: 'tenant',
+        tenantProfile: {
+          create: {
+            apartmentId: data.apartmentId,
+            rentPaymentDay: data.rentPaymentDay,
+            rentAmount: data.rentAmount,
+            status: 'active'
+          }
+        }
+      },
+      include: { tenantProfile: true }
+    });
+    return this.serialize(user);
+  }
+
   async findApartments(filters: { address?: string; organization?: string; externalId?: string }) {
     const where: any = {
       ...(filters.externalId ? { externalId: { contains: filters.externalId, mode: 'insensitive' } } : {}),
@@ -421,6 +440,19 @@ export class AccountantService {
       include: { identities: true }
     });
     return this.serialize(tenant);
+  }
+
+  async findAllUsers() {
+    const users = await this.prisma.user.findMany({
+      include: {
+        identities: true,
+        tenantProfile: {
+          include: { apartment: true }
+        }
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+    return this.serialize(users);
   }
 
   async findInvoiceById(id: number) {
