@@ -69,6 +69,7 @@ export class AccountantService {
           data: {
             accountNumber: data.accountNumber,
             accountLabel: data.accountLabel,
+            balance: data.balance,
             rawJson: data.rawJson,
             lastSeenAt: new Date(),
           },
@@ -79,6 +80,7 @@ export class AccountantService {
             apartmentId: apartment.id,
             accountNumber: data.accountNumber,
             accountLabel: data.accountLabel,
+            balance: data.balance,
             rawJson: data.rawJson,
             firstSeenAt: new Date(),
             lastSeenAt: new Date(),

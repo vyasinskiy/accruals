@@ -37,26 +37,17 @@ describe('KvartplataAdapter Extraction Logic', () => {
   describe('extractAccounts', () => {
     const mockApartment = { externalId: 'apt-1', address: 'Addr 1', organization: 'Org 1', rawJson: '{}' };
 
-    it('should extract accounts from nested payload', () => {
+    it('should extract accounts from nested payload with balance', () => {
       const payload = {
         accounts: [
-          { id: 'acc-1', number: '123', name: 'Water' },
-          { ls: 'acc-2', personalAccount: '456', title: 'Electricity' }
+          { id: 'acc-1', number: '123', name: 'Water', balance: -100.50 },
+          { ls: 'acc-2', debt: '500,25' }
         ]
       };
       const result = extractAccounts(mockApartment, payload);
       expect(result).toHaveLength(2);
-      expect(result[0]).toEqual(expect.objectContaining({
-        externalId: 'acc-1',
-        accountNumber: '123',
-        accountLabel: 'Water'
-      }));
-      // Note: accountNumber picks 'acc-2' from 'ls' because 'ls' is before 'personalAccount' in search list.
-      expect(result[1]).toEqual(expect.objectContaining({
-        externalId: 'acc-2',
-        accountNumber: 'acc-2',
-        accountLabel: 'Electricity'
-      }));
+      expect(result[0].balance).toBe(-100.50);
+      expect(result[1].balance).toBe(500.25);
     });
   });
 

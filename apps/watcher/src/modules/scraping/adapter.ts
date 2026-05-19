@@ -268,6 +268,7 @@ export function extractAccounts(apartment: ApartmentSnapshot, payload: unknown):
       apartmentExternalId: apartment.externalId,
       accountNumber: pickString(row, ['number', 'Number', 'accountNumber', 'AccountNumber', 'ls', 'personalAccount']) ?? accountId,
       accountLabel: pickString(row, ['name', 'Name', 'caption', 'Caption', 'title', 'Title']),
+      balance: pickNumber(row, ['balance', 'Balance', 'debt', 'Debt', 'value', 'Value']),
       rawJson: JSON.stringify({ apartment, account: row })
     });
   }
@@ -352,6 +353,18 @@ function pickString(source: Record<string, unknown>, keys: string[]): string | u
     const value = source[key];
     if (typeof value === 'string' && value.trim()) return value.trim();
     if (typeof value === 'number') return String(value);
+  }
+  return undefined;
+}
+
+function pickNumber(source: Record<string, unknown>, keys: string[]): number | undefined {
+  for (const key of keys) {
+    const value = source[key];
+    if (typeof value === 'number') return value;
+    if (typeof value === 'string' && value.trim()) {
+      const parsed = parseFloat(value.replace(',', '.').replace(/\s/g, ''));
+      if (!isNaN(parsed)) return parsed;
+    }
   }
   return undefined;
 }

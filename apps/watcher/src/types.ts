@@ -12,6 +12,7 @@ export interface AccountSnapshot {
   apartmentExternalId: string;
   accountNumber?: string;
   accountLabel?: string;
+  balance?: number;
   rawJson?: string;
 }
 

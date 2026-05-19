@@ -72,6 +72,7 @@ model Account {
   apartmentId   Int       @map("apartment_id")
   accountNumber String?   @map("account_number")
   accountLabel  String?   @map("account_label")
+  balance       Decimal?  @db.Decimal(10, 2)
   rawJson       String?   @map("raw_json")
   firstSeenAt   DateTime  @map("first_seen_at")
   lastSeenAt    DateTime  @map("last_seen_at")

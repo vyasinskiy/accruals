@@ -86,6 +86,36 @@ describe('AccountantService', () => {
     });
   });
 
+  describe('upsertAccount', () => {
+    it('should create account with balance if it does not exist', async () => {
+      const dto = { externalId: 'acc-1', apartmentExternalId: 'apt-1', accountNumber: '123', balance: -500.50 };
+      mockPrisma.apartment.findUnique.mockResolvedValue({ id: 1, externalId: 'apt-1' });
+      mockPrisma.account.findUnique.mockResolvedValue(null);
+      mockPrisma.account.create.mockResolvedValue({ ...dto, id: 10, apartmentId: 1 });
+
+      const result = await service.upsertAccount(dto);
+
+      expect(result.externalId).toBe('acc-1');
+      expect(result.balance).toBe(-500.50);
+      expect(mockPrisma.account.create).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({ balance: -500.50 })
+      }));
+    });
+
+    it('should update account balance if it exists', async () => {
+      const dto = { externalId: 'acc-1', apartmentExternalId: 'apt-1', balance: -600.75 };
+      mockPrisma.apartment.findUnique.mockResolvedValue({ id: 1, externalId: 'apt-1' });
+      mockPrisma.account.findUnique.mockResolvedValue({ id: 10, externalId: 'acc-1', balance: -500.50 });
+      mockPrisma.account.update.mockResolvedValue({ id: 10, externalId: 'acc-1', balance: -600.75 });
+
+      await service.upsertAccount(dto);
+
+      expect(mockPrisma.account.update).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({ balance: -600.75 })
+      }));
+    });
+  });
+
   describe('upsertAccrual', () => {
     it('should emit notification for new accrual', async () => {
       const dto = { accountExternalId: 'acc-1', periodId: '202605', periodLabel: 'May 2026', amountText: '100' };
@@ -96,8 +126,9 @@ describe('AccountantService', () => {
 
       await service.upsertAccrual(dto);
 
-      expect(notificationsClient.emit).toHaveBeenCalledWith('notify_accrual', expect.objectContaining({
-        message: expect.stringContaining('Новое начисление'),
+      expect(notificationsClient.emit).toHaveBeenCalledWith('accrual_upserted', expect.objectContaining({
+        periodLabel: 'May 2026',
+        amountText: '100'
       }));
     });
 
