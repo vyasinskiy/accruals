@@ -14,8 +14,48 @@ export class AdminInteractionService {
     private readonly prisma: PrismaService
   ) {}
 
+  async showApartmentMenu(ctx: any, apartmentId: number) {
+    try {
+      const apartments = await firstValueFrom(this.accountantClient.send('get_apartments', { id: apartmentId }));
+      const apt = apartments.find((a: any) => a.id === apartmentId);
+      if (!apt) return ctx.reply('Квартира не найдена.');
+
+      const tenant = apt.tenants?.[0];
+      const tenantName = tenant?.user?.name || 'Нет арендатора';
+      
+      // Calculate Debt (latest invoice amount)
+      let debtInfo = 'Задолженность: Нет данных';
+      const latestAccrual = apt.accounts?.[0]?.accruals?.[0];
+      if (latestAccrual) {
+        debtInfo = `Задолженность (за ${latestAccrual.periodLabel}): <b>${latestAccrual.amountText || '0'}</b>`;
+      }
+
+      const message = `🏠 <b>Квартира: ${apt.address}</b>\n` +
+        `👤 Арендатор: ${tenantName}\n` +
+        `📅 День оплаты: ${tenant?.rentPaymentDay || 'Не задан'}\n` +
+        `💰 Сумма: ${tenant?.rentAmount || 'Не задана'}\n\n` +
+        `${debtInfo}`;
+
+      const buttons = [];
+      if (tenant) {
+        buttons.push([Markup.button.callback('📅 Изменить день оплаты', `admin_edit_rent_day_${tenant.id}_${apt.id}`)]);
+        buttons.push([Markup.button.callback('💰 Изменить сумму аренды', `admin_edit_rent_amount_${tenant.id}_${apt.id}`)]);
+      }
+      buttons.push([Markup.button.callback('↩️ К списку квартир', 'admin_list_apartments')]);
+
+      const method = ctx.callbackQuery ? 'editMessageText' : 'reply';
+      await (ctx as any)[method](message, {
+        parse_mode: 'HTML',
+        ...Markup.inlineKeyboard(buttons)
+      });
+    } catch (e) {
+      this.logger.error('Failed to open apartment menu', e);
+      await ctx.reply('Ошибка загрузки данных квартиры.');
+    }
+  }
+
   registerHandlers(bot: Telegraf<any>) {
-    // Admin Menu - List Pending Tenants
+    // Admin Menu - Show Pending Tenants AND Apartments
     bot.hears('Админ Меню', async (ctx) => {
       try {
         const user = await this.prisma.user.findUnique({ where: { telegramId: BigInt(ctx.from.id) } });
@@ -23,21 +63,88 @@ export class AdminInteractionService {
           return ctx.reply('Нет доступа.');
         }
 
+        // 1. Pending Tenants
         const pendingTenants = await firstValueFrom(this.accountantClient.send('get_pending_tenants', {}));
-        if (!pendingTenants || pendingTenants.length === 0) {
-          return ctx.reply('Нет заявок на регистрацию в ожидании.');
+        if (pendingTenants && pendingTenants.length > 0) {
+          await ctx.reply(`📝 <b>Заявки на регистрацию (${pendingTenants.length}):</b>`, { parse_mode: 'HTML' });
+          for (const tenant of pendingTenants) {
+             await ctx.reply(`Заявка от: ${tenant.user?.name || 'Неизвестно'}\nТелефон: ${tenant.phone || 'Неизвестно'}\nID: ${tenant.id}`, Markup.inlineKeyboard([
+               Markup.button.callback('Привязать к квартире', `admin_link_tenant_${tenant.id}`),
+               Markup.button.callback('❌ Отклонить', `admin_reject_tenant_${tenant.id}`)
+             ]));
+          }
+        } else {
+          await ctx.reply('📝 Нет заявок на регистрацию в ожидании.');
         }
 
-        for (const tenant of pendingTenants) {
-           await ctx.reply(`Заявка от: ${tenant.user?.name || 'Неизвестно'}\nID: ${tenant.id}`, Markup.inlineKeyboard([
-             Markup.button.callback('Привязать к квартире', `admin_link_tenant_${tenant.id}`),
-             Markup.button.callback('❌ Отклонить', `admin_reject_tenant_${tenant.id}`)
-           ]));
-        }
+        // 2. Apartments List button
+        await ctx.reply('🏠 <b>Управление квартирами</b>\nНажмите кнопку ниже, чтобы просмотреть список квартир и их настройки:', {
+          parse_mode: 'HTML',
+          ...Markup.inlineKeyboard([
+            [Markup.button.callback('📂 Список квартир', 'admin_list_apartments')]
+          ])
+        });
+
       } catch (e) {
-        this.logger.error('Failed to get pending tenants', e);
+        this.logger.error('Failed to open admin menu', e);
         ctx.reply('Произошла ошибка. Попробуйте позже.');
       }
+    });
+
+    // Action: List Apartments
+    bot.action('admin_list_apartments', async (ctx) => {
+      try {
+        const apartments = await firstValueFrom(this.accountantClient.send('get_apartments', {}));
+        if (!apartments || apartments.length === 0) {
+          return ctx.answerCbQuery('Квартиры не найдены.');
+        }
+
+        await ctx.answerCbQuery();
+        await ctx.reply('🏠 <b>Выберите квартиру:</b>', {
+          parse_mode: 'HTML',
+          ...Markup.inlineKeyboard(
+            apartments.map((apt: any) => [Markup.button.callback(apt.address || apt.externalId, `admin_apt_menu_${apt.id}`)])
+          )
+        });
+      } catch (e) {
+        this.logger.error('Failed to list apartments', e);
+        await ctx.answerCbQuery('Ошибка загрузки списка.');
+      }
+    });
+
+    // Action: Apartment Submenu
+    bot.action(/admin_apt_menu_(\d+)/, async (ctx) => {
+      const apartmentId = parseInt(ctx.match[1]);
+      await this.showApartmentMenu(ctx, apartmentId);
+      await ctx.answerCbQuery();
+    });
+
+    // Action: Edit Rent Day (Step 1)
+    bot.action(/admin_edit_rent_day_(\d+)_(\d+)/, async (ctx) => {
+      const tenantId = parseInt(ctx.match[1]);
+      const apartmentId = parseInt(ctx.match[2]);
+      const sessionCtx = ctx as any;
+      sessionCtx.session = sessionCtx.session || {};
+      sessionCtx.session.state = 'admin_editing_rent_day';
+      sessionCtx.session.editTenantId = tenantId;
+      sessionCtx.session.editApartmentId = apartmentId;
+      
+      await ctx.editMessageText('Введите новый день оплаты (число от 1 до 31):', Markup.inlineKeyboard([]));
+      await ctx.answerCbQuery();
+    });
+
+    // Action: Edit Rent Amount (Step 1)
+    bot.action(/admin_edit_rent_amount_(\d+)_(\d+)/, async (ctx) => {
+      const tenantId = parseInt(ctx.match[1]);
+      const apartmentId = parseInt(ctx.match[2]);
+      const sessionCtx = ctx as any;
+      sessionCtx.session = sessionCtx.session || {};
+      sessionCtx.session.state = 'admin_editing_rent_amount';
+      sessionCtx.session.editTenantId = tenantId;
+      sessionCtx.session.editApartmentId = apartmentId;
+      
+      await ctx.editMessageText('Введите новую сумму ежемесячной аренды:', Markup.inlineKeyboard([]));
+      await ctx.answerCbQuery();
     });
 
     // User Management - List All Users from local Bot DB
@@ -53,17 +160,38 @@ export class AdminInteractionService {
           return ctx.reply('Пользователей не найдено в базе бота.');
         }
 
+        let allAccUsers: any[] = [];
+        try {
+          allAccUsers = await firstValueFrom(this.accountantClient.send('get_all_users', {}));
+        } catch (e) {
+          this.logger.warn('Could not fetch users from accountant for addresses');
+        }
+
+        const addressMap = new Map<string, string>();
+        if (Array.isArray(allAccUsers)) {
+          for (const accUser of allAccUsers) {
+            const tgIdentity = accUser.identities?.find((i: any) => i.platform === 'telegram');
+            const address = accUser.tenantProfile?.apartment?.address;
+            if (tgIdentity && address) {
+              addressMap.set(tgIdentity.externalId.toString(), address);
+            }
+          }
+        }
+
         for (const u of users) {
            const roleStr = u.role === 'admin' ? '(Админ)' : '(Арендатор)';
            const name = [u.firstName, u.lastName].filter(Boolean).join(' ') || u.username || 'Неизвестно';
            const isSuperAdmin = u.telegramId.toString() === config.SUPER_ADMIN_TELEGRAM_ID;
+
+           const address = addressMap.get(u.telegramId.toString());
+           const displayInfo = address ? `Квартира: ${address}` : `TG ID: ${u.telegramId}`;
 
            const buttons = [];
            if (!isSuperAdmin) {
              buttons.push(Markup.button.callback('❌ Удалить', `admin_delete_user_${u.id}`));
            }
            
-           await ctx.reply(`👤 <b>${name}</b> ${roleStr}\nTG ID: ${u.telegramId}`, {
+           await ctx.reply(`👤 <b>${name}</b> ${roleStr}\n${displayInfo}`, {
              parse_mode: 'HTML',
              ...(buttons.length > 0 ? Markup.inlineKeyboard(buttons) : {})
            });

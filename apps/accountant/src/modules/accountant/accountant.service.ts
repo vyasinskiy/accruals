@@ -215,10 +215,18 @@ export class AccountantService {
     return { result: this.serialize(result), isNew: !existing };
   }
 
-  async createPayment(data: { userId: number; userName: string; amount: number; receiptPhotoId: string }) {
+  async createPayment(data: { telegramId: number | string; userName: string; amount: number; receiptPhotoId: string | null }) {
+    const identity = await this.prisma.userIdentity.findUnique({
+      where: { platform_externalId: { platform: 'telegram', externalId: data.telegramId.toString() } }
+    });
+
+    if (!identity) {
+      throw new Error(`User with Telegram ID ${data.telegramId} not found in accounting system.`);
+    }
+
     const result = await this.prisma.payment.create({
       data: {
-        userId: data.userId,
+        userId: identity.userId,
         userName: data.userName,
         amount: data.amount,
         receiptPhotoId: data.receiptPhotoId,
@@ -253,13 +261,42 @@ export class AccountantService {
     return this.serialize(result);
   }
 
+  async updateTenantPaymentSettings(tenantId: number, rentPaymentDay?: number, rentAmount?: number) {
+    const data: any = {};
+    if (rentPaymentDay !== undefined) data.rentPaymentDay = rentPaymentDay;
+    if (rentAmount !== undefined) data.rentAmount = rentAmount;
+
+    const result = await this.prisma.tenant.update({
+      where: { id: tenantId },
+      data,
+    });
+    return this.serialize(result);
+  }
+
   async findApartments(filters: { address?: string; organization?: string; externalId?: string }) {
     const where: any = {
       ...(filters.externalId ? { externalId: { contains: filters.externalId, mode: 'insensitive' } } : {}),
       ...(filters.address ? { address: { contains: filters.address, mode: 'insensitive' } } : {}),
       ...(filters.organization ? { organization: { contains: filters.organization, mode: 'insensitive' } } : {}),
     };
-    const results = await this.prisma.apartment.findMany({ where, orderBy: [{ address: 'asc' }] });
+    const results = await this.prisma.apartment.findMany({ 
+      where, 
+      include: {
+        tenants: {
+          where: { status: 'active' },
+          include: { user: true }
+        },
+        accounts: {
+          include: {
+            accruals: {
+              orderBy: { periodId: 'desc' },
+              take: 1
+            }
+          }
+        }
+      },
+      orderBy: [{ address: 'asc' }] 
+    });
     return this.serialize(results);
   }
 

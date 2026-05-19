@@ -104,6 +104,11 @@ export class AccountantController {
     return this.accountantService.findTenantByApartment(apartmentId);
   }
 
+  @MessagePattern('update_tenant_payment_settings')
+  async updateTenantPaymentSettings(@Payload() data: { tenantId: number; rentPaymentDay?: number; rentAmount?: number }) {
+    return this.accountantService.updateTenantPaymentSettings(data.tenantId, data.rentPaymentDay, data.rentAmount);
+  }
+
   @Get('apartments/:id')
   async findApartment(@Param('id', ParseIntPipe) id: number) {
     return this.accountantService.findApartmentById(id);

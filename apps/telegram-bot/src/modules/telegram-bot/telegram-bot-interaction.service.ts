@@ -8,8 +8,11 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 
 interface MyContext extends Context {
   session: {
-    state?: 'awaiting_registration_name' | 'awaiting_registration_phone' | 'awaiting_amount' | 'awaiting_photo' | 'awaiting_admin_rent_day' | 'awaiting_admin_rent_amount';
+    state?: 'awaiting_registration_name' | 'awaiting_registration_phone' | 'awaiting_amount' | 'awaiting_photo' | 'awaiting_admin_rent_day' | 'awaiting_admin_rent_amount' | 'admin_editing_rent_day' | 'admin_editing_rent_amount';
     amount?: number;
+    paymentTargetTelegramId?: string;
+    editTenantId?: number;
+    editApartmentId?: number;
     regData?: {
       name?: string;
     };
@@ -107,10 +110,46 @@ export class TelegramBotInteractionService implements OnModuleInit {
         }
 
         ctx.session = ctx.session || {};
+
+        if (user.role === 'admin') {
+          const apartments = await firstValueFrom(this.accountantClient.send('get_apartments', {}));
+          if (!apartments || apartments.length === 0) {
+            return ctx.reply('Нет доступных квартир для добавления оплаты.');
+          }
+          const buttons = apartments.map((apt: any) => [Markup.button.callback(apt.address || apt.externalId, `admin_pay_apt_${apt.id}`)]);
+          return ctx.reply('Выберите квартиру для добавления оплаты:', Markup.inlineKeyboard(buttons));
+        }
+
         ctx.session.state = 'awaiting_amount';
+        ctx.session.paymentTargetTelegramId = ctx.from.id.toString();
         ctx.reply('Введите сумму оплаты (только число):');
       } catch (e) {
         ctx.reply('Произошла ошибка. Попробуйте позже.');
+      }
+    });
+
+    this.bot.action(/admin_pay_apt_(\d+)/, async (ctx) => {
+      const apartmentId = parseInt(ctx.match[1]);
+      try {
+        const tenant = await firstValueFrom(this.accountantClient.send('get_tenant_by_apartment', apartmentId));
+        if (!tenant) {
+          return ctx.answerCbQuery('В этой квартире нет активного арендатора.', { show_alert: true });
+        }
+        
+        const tgIdentity = tenant.identities?.find((i: any) => i.platform === 'telegram');
+        if (!tgIdentity) {
+           return ctx.answerCbQuery('У арендатора нет Telegram.', { show_alert: true });
+        }
+
+        ctx.session = ctx.session || {};
+        ctx.session.state = 'awaiting_amount';
+        ctx.session.paymentTargetTelegramId = tgIdentity.externalId;
+        
+        await ctx.answerCbQuery();
+        await ctx.editMessageText(`Выбрана квартира. Арендатор: ${tenant.name || 'Неизвестно'}\nВведите сумму оплаты (только число):`, Markup.inlineKeyboard([]));
+      } catch (e) {
+        this.logger.error('Failed to prepare admin payment', e);
+        await ctx.answerCbQuery('Ошибка сервера.');
       }
     });
 
@@ -148,7 +187,9 @@ export class TelegramBotInteractionService implements OnModuleInit {
         }
         ctx.session.amount = amount;
         ctx.session.state = 'awaiting_photo';
-        return ctx.reply('Пришлите фотографию чека/подтверждения:');
+        return ctx.reply('Пришлите фотографию чека/подтверждения:', Markup.inlineKeyboard([
+          Markup.button.callback('Нет чека', 'skip_receipt_photo')
+        ]));
       }
 
       if (ctx.session?.state === 'awaiting_admin_rent_day') {
@@ -192,6 +233,58 @@ export class TelegramBotInteractionService implements OnModuleInit {
         }
       }
 
+      if (ctx.session?.state === 'admin_editing_rent_day') {
+        const day = parseInt(ctx.message.text);
+        if (isNaN(day) || day < 1 || day > 31) {
+          return ctx.reply('Пожалуйста, введите корректный день месяца (от 1 до 31).');
+        }
+        try {
+          await firstValueFrom(this.accountantClient.send('update_tenant_payment_settings', { 
+            tenantId: ctx.session.editTenantId, 
+            rentPaymentDay: day 
+          }));
+          const aptId = ctx.session.editApartmentId;
+          ctx.session.state = undefined;
+          ctx.session.editTenantId = undefined;
+          ctx.session.editApartmentId = undefined;
+          
+          await ctx.reply(`✅ День оплаты успешно изменен на ${day}.`);
+          if (aptId) {
+            await this.adminInteractionService.showApartmentMenu(ctx, aptId);
+          }
+          return;
+        } catch (e) {
+          this.logger.error('Failed to update rent day', e);
+          return ctx.reply('Ошибка при обновлении дня оплаты.');
+        }
+      }
+
+      if (ctx.session?.state === 'admin_editing_rent_amount') {
+        const amount = parseFloat(ctx.message.text.replace(',', '.'));
+        if (isNaN(amount) || amount <= 0) {
+          return ctx.reply('Пожалуйста, введите корректную сумму (больше 0).');
+        }
+        try {
+          await firstValueFrom(this.accountantClient.send('update_tenant_payment_settings', { 
+            tenantId: ctx.session.editTenantId, 
+            rentAmount: amount 
+          }));
+          const aptId = ctx.session.editApartmentId;
+          ctx.session.state = undefined;
+          ctx.session.editTenantId = undefined;
+          ctx.session.editApartmentId = undefined;
+          
+          await ctx.reply(`✅ Сумма аренды успешно изменена на ${amount}.`);
+          if (aptId) {
+            await this.adminInteractionService.showApartmentMenu(ctx, aptId);
+          }
+          return;
+        } catch (e) {
+          this.logger.error('Failed to update rent amount', e);
+          return ctx.reply('Ошибка при обновлении суммы аренды.');
+        }
+      }
+
       return next();
     });
 
@@ -205,7 +298,7 @@ export class TelegramBotInteractionService implements OnModuleInit {
         // Save to DB via accountant
         try {
           const payment = await firstValueFrom(this.accountantClient.send('create_payment', {
-            userId: ctx.from.id,
+            telegramId: ctx.from.id,
             userName: ctx.from.username || ctx.from.first_name,
             amount,
             receiptPhotoId: photo.file_id
@@ -216,10 +309,42 @@ export class TelegramBotInteractionService implements OnModuleInit {
 
           await ctx.reply('Оплата добавлена и отправлена на подтверждение админу.');
         } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
+          const message = error instanceof Error ? error.message : (typeof error === 'object' ? JSON.stringify(error) : String(error));
           this.logger.error(`Failed to create payment: ${message}`);
           await ctx.reply('Произошла ошибка при сохранении данных. Попробуйте позже.');
         }
+      }
+    });
+
+    this.bot.action('skip_receipt_photo', async (ctx) => {
+      if (ctx.session?.state === 'awaiting_photo') {
+        const amount = ctx.session.amount;
+        const targetTelegramId = ctx.session.paymentTargetTelegramId || ctx.from.id;
+        
+        this.logger.log(`User ${ctx.from.id} submitted payment without photo for amount ${amount} (Target: ${targetTelegramId})`);
+
+        try {
+          await firstValueFrom(this.accountantClient.send('create_payment', {
+            telegramId: targetTelegramId,
+            userName: ctx.from.username || ctx.from.first_name,
+            amount,
+            receiptPhotoId: null
+          }));
+
+          ctx.session.state = undefined;
+          ctx.session.amount = undefined;
+          ctx.session.paymentTargetTelegramId = undefined;
+
+          await ctx.answerCbQuery('Отправлено без чека');
+          await ctx.editMessageText('Оплата добавлена без чека и отправлена на подтверждение админу.', Markup.inlineKeyboard([]));
+        } catch (error) {
+          const message = error instanceof Error ? error.message : (typeof error === 'object' ? JSON.stringify(error) : String(error));
+          this.logger.error(`Failed to create payment: ${message}`);
+          await ctx.answerCbQuery('Ошибка при сохранении');
+          await ctx.reply('Произошла ошибка при сохранении данных. Попробуйте позже.');
+        }
+      } else {
+        await ctx.answerCbQuery('Действие недействительно');
       }
     });
   }
