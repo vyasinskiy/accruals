@@ -42,6 +42,7 @@ const schema = z.object({
   RABBITMQ_URL: z.string().default('amqp://localhost:5672'),
   QUEUE_NAME: z.string().default('accruals_notifications'),
   ACCOUNTANT_QUEUE: z.string().default('accountant_queue'),
+  WATCHER_QUEUE: z.string().default('watcher_queue'),
   ACCOUNTANT_API_URL: z.string().url().default('http://localhost:3005'),
   SCRAPE_CRON: z.string().default('0 0,3,6,9,12,15,18,21 * * *'),
   TZ: z.string().default('Europe/Madrid')

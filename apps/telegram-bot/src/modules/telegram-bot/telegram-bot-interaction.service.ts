@@ -86,7 +86,7 @@ export class TelegramBotInteractionService implements OnModuleInit {
 
         return ctx.reply('Здравствуйте, администратор! Я бот для учета начислений.', Markup.keyboard([
           ['Добавить оплату', 'Список квартир'],
-          ['Управление пользователями']
+          ['Управление пользователями', 'Запустить сканирование']
         ]).resize());
       } catch (e) {
         this.logger.error('Failed to handle /start', e);

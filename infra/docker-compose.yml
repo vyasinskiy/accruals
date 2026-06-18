@@ -22,6 +22,7 @@ services:
       - '5432:5432'
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
     networks:
       - accruals-network
     healthcheck:
@@ -64,6 +65,8 @@ services:
       BROWSER_WS_ENDPOINT: ""
       BROWSER_PROFILE_PATH: "/app/data/browser-profile/.config/chromium"
       IS_DOCKER: "true"
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/watcher_db
+      DIRECT_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/watcher_db
     depends_on:
       rabbitmq:
         condition: service_started
@@ -86,8 +89,8 @@ services:
     env_file:
       - ${ACCOUNTANT_PATH:-../apps/accountant}/.env
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-kvartplata_watcher}?schema=public
-      DIRECT_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-kvartplata_watcher}?schema=public
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/accountant_db
+      DIRECT_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/accountant_db
       RABBITMQ_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASS:-guest}@rabbitmq:5672
       SUPER_ADMIN_TELEGRAM_ID: ${SUPER_ADMIN_TELEGRAM_ID}
     depends_on:
@@ -109,7 +112,7 @@ services:
       - ${TELEGRAM_BOT_PATH:-../apps/telegram-bot}/.env
     environment:
       RABBITMQ_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASS:-guest}@rabbitmq:5672
-      TELEGRAM_BOT_DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-kvartplata_watcher}?schema=telegram_bot
+      TELEGRAM_BOT_DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/telegram_bot_db
       SUPER_ADMIN_TELEGRAM_ID: ${SUPER_ADMIN_TELEGRAM_ID}
     depends_on:
       rabbitmq:

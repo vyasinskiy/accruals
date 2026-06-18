@@ -211,6 +211,7 @@ export class AccountantService {
 
     if (!existing) {
       this.notificationsClient.emit('invoice_available', {
+        id: result.id,
         periodLabel: data.periodLabel,
         apartmentId: account.apartmentId
       });
@@ -380,10 +381,14 @@ export class AccountantService {
     return this.serialize(results);
   }
 
-  async findAccruals(filters: { accountId?: number; accountExternalId?: string; periodLabel?: string }) {
+  async findAccruals(filters: { accountId?: number; accountExternalId?: string | string[]; periodLabel?: string }) {
     const where: any = {
       ...(filters.accountId ? { accountId: Number(filters.accountId) } : {}),
-      ...(filters.accountExternalId ? { accountExternalId: filters.accountExternalId } : {}),
+      ...(filters.accountExternalId ? { 
+        accountExternalId: Array.isArray(filters.accountExternalId) 
+          ? { in: filters.accountExternalId } 
+          : filters.accountExternalId 
+      } : {}),
       ...(filters.periodLabel ? { periodLabel: { contains: filters.periodLabel, mode: 'insensitive' } } : {})
     };
     const results = await this.prisma.accrual.findMany({ where, include: { account: { include: { apartment: true } } }, orderBy: [{ periodLabel: 'desc' }] });

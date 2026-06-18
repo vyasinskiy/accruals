@@ -31,7 +31,7 @@ describe('ApiService', () => {
 
   describe('getRuns', () => {
     it('should call prisma.run.findMany with correct arguments', async () => {
-      const mockRuns = [{ id: '1' }];
+      const mockRuns = [{ id: 1 }];
       mockPrismaService.run.findMany.mockResolvedValue(mockRuns);
       const result = await service.getRuns();
       expect(result).toEqual(mockRuns);

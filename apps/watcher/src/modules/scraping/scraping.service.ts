@@ -1,4 +1,3 @@
-import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { lastValueFrom } from 'rxjs';
 import { Inject, Injectable } from '@nestjs/common';
@@ -34,16 +33,15 @@ export class ScrapingService {
   async scan(input: ManualScanDto = {}): Promise<ScanSummary> {
     const startedAt = new Date();
     const trigger = input.trigger ?? 'manual';
-    const runId = crypto.randomUUID();
     const log = (message: string) => {
       const timestamp = new Date().toLocaleString('ru-RU', { timeZone: config.TZ });
       console.log(`[${timestamp}] [scan:${trigger}] ${message}`);
     };
 
+    let runId: number | undefined = undefined;
     try {
-      await this.prisma.run.create({
+      const run = await this.prisma.run.create({
         data: {
-          id: runId,
           startedAt,
           trigger,
           status: 'warning',
@@ -51,6 +49,7 @@ export class ScrapingService {
           summaryJson: '{}'
         }
       });
+      runId = run.id;
 
       log('Run started');
       const dbApartments = await this.accountantClientService.findApartments({
@@ -227,6 +226,45 @@ export class ScrapingService {
       }
       log(`${blue}-----------------------------${reset}`);
 
+      let newApartments = 0;
+      let newAccruals = 0;
+      let newInvoices = 0;
+
+      try {
+        const existingApartments = await this.accountantClientService.findApartments({});
+        const apartmentMap = new Set((existingApartments || []).map((apt: any) => apt.externalId));
+        for (const apartment of apartments) {
+          if (!apartmentMap.has(apartment.externalId)) {
+            newApartments++;
+          }
+        }
+
+        const accountIds = accounts.map(a => a.externalId);
+        if (accountIds.length > 0) {
+          const existingAccruals = await this.accountantClientService.findAccruals({
+            accountExternalId: accountIds
+          });
+          const accrualMap = new Set((existingAccruals || []).map((acc: any) => `${acc.accountExternalId}_${acc.periodId}`));
+          for (const accrual of accruals) {
+            if (!accrualMap.has(`${accrual.accountExternalId}_${accrual.periodId}`)) {
+              newAccruals++;
+            }
+          }
+
+          const existingInvoices = await this.accountantClientService.findInvoices({
+            accountExternalId: accountIds
+          });
+          const invoiceMap = new Set((existingInvoices || []).map((inv: any) => `${inv.accountExternalId}_${inv.periodId}`));
+          for (const invoice of invoices) {
+            if (!invoiceMap.has(`${invoice.accountExternalId}_${invoice.periodId}`)) {
+              newInvoices++;
+            }
+          }
+        }
+      } catch (err: any) {
+        log(`Failed to calculate new items counts: ${err.message}`);
+      }
+
       const summary = await this.finalize(runId, {
         startedAt: startedAt.toISOString(),
         finishedAt: new Date().toISOString(),
@@ -236,9 +274,9 @@ export class ScrapingService {
         apartmentsScanned: apartments.length,
         accrualsObserved: accruals.length,
         invoicesObserved: invoices.length,
-        newApartments: 0, 
-        newAccruals: 0,
-        newInvoices: 0,
+        newApartments,
+        newAccruals,
+        newInvoices,
         needsLogin
       });
 
@@ -249,6 +287,7 @@ export class ScrapingService {
       log(`Run failed: ${message}`);
       
       try {
+        if (runId !== undefined) {
           return await this.finalize(runId, {
             startedAt: startedAt.toISOString(),
             finishedAt: new Date().toISOString(),
@@ -263,10 +302,11 @@ export class ScrapingService {
             newInvoices: 0,
             needsLogin: false
           });
+        }
       } catch (finalizeError) {
           log(`Final fatal error (could not even finalize run): ${finalizeError instanceof Error ? finalizeError.message : String(finalizeError)}`);
-          throw error;
       }
+      throw error;
     }
   }
 
@@ -274,7 +314,7 @@ export class ScrapingService {
     return [];
   }
 
-  private async finalize(runId: string, summary: ScanSummary): Promise<ScanSummary> {
+  private async finalize(runId: number, summary: ScanSummary): Promise<ScanSummary> {
     await this.prisma.run.update({
       where: { id: runId },
       data: {

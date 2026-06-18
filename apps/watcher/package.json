@@ -12,6 +12,7 @@
     "bootstrap": "tsx src/scripts/bootstrap.ts",
     "scan": "tsx src/scripts/scan.ts",
     "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate deploy",
     "test": "jest",
     "playwright:install": "PLAYWRIGHT_BROWSERS_PATH=./.playwright-browsers npx playwright install chromium",
     "deploy": "./scripts/deploy.sh",

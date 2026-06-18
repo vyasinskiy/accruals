@@ -4,12 +4,13 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = "file:../data/watcher.db"
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 model Run {
-  id                String    @id
+  id                Int       @id @default(autoincrement())
   startedAt         DateTime  @map("started_at")
   finishedAt        DateTime? @map("finished_at")
   trigger           String    @default("manual")

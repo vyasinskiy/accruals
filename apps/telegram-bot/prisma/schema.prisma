@@ -19,3 +19,13 @@ model User {
 
   @@map("users")
 }
+
+model PublishedInvoice {
+  id          Int      @id @default(autoincrement())
+  invoiceId   Int      @map("invoice_id")
+  chatId      String   @map("chat_id")
+  publishedAt DateTime @default(now()) @map("published_at")
+
+  @@unique([invoiceId, chatId])
+  @@map("published_invoices")
+}

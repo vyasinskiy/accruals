@@ -118,8 +118,8 @@ model Invoice {
   uploadedToS3      Boolean   @default(false) @map("uploaded_to_s3")
   rawJson           String?   @map("raw_json")
   firstSeenAt       DateTime  @map("first_seen_at")
-  lastSeenAt    DateTime  @map("last_seen_at")
-  account           Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  lastSeenAt        DateTime  @map("last_seen_at")
+  account           Account              @relation(fields: [accountId], references: [id], onDelete: Cascade)
 
   @@unique([accountExternalId, periodId])
   @@index([accountId, periodLabel], map: "idx_invoices_account_period")

@@ -1,6 +1,7 @@
 import 'reflect-metadata';
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import { MicroserviceOptions, Transport } from '@nestjs/microservices';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { config } from './config';
 import { AppModule } from './app.module';
@@ -8,6 +9,17 @@ import { AppModule } from './app.module';
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule);
   app.useGlobalPipes(new ValidationPipe({ transform: true, whitelist: true }));
+
+  app.connectMicroservice<MicroserviceOptions>({
+    transport: Transport.RMQ,
+    options: {
+      urls: [config.RABBITMQ_URL],
+      queue: config.WATCHER_QUEUE,
+      queueOptions: {
+        durable: true,
+      },
+    },
+  });
 
   const swagger = new DocumentBuilder()
     .setTitle('kvartplata-watcher API')
@@ -18,8 +30,10 @@ async function bootstrap(): Promise<void> {
   const document = SwaggerModule.createDocument(app, swagger);
   SwaggerModule.setup('docs', app, document);
 
+  await app.startAllMicroservices();
   await app.listen(config.PORT);
   console.log(`kvartplata-watcher listening on http://localhost:${config.PORT}`);
+  console.log('kvartplata-watcher RMQ microservice is listening...');
   console.log(`Swagger UI: http://localhost:${config.PORT}/docs`);
 }
 

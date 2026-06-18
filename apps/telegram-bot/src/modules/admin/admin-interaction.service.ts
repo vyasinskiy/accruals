@@ -12,6 +12,7 @@ export class AdminInteractionService {
 
   constructor(
     @Inject('ACCOUNTANT_SERVICE') private readonly accountantClient: ClientProxy,
+    @Inject('WATCHER_SERVICE') private readonly watcherClient: ClientProxy,
     private readonly prisma: PrismaService
   ) {}
 
@@ -211,6 +212,55 @@ export class AdminInteractionService {
 
     bot.hears('Список квартир', async (ctx) => {
       await this.listApartments(ctx);
+    });
+
+    bot.hears('Запустить сканирование', async (ctx) => {
+      try {
+        await ctx.reply('🚀 Запуск сканирования...');
+        
+        // Trigger scan in watcher
+        const summary = await firstValueFrom(this.watcherClient.send('run_scan', {}));
+        
+        const statusEmoji = summary.status === 'success' ? '✅' : (summary.status === 'warning' ? '⚠️' : '❌');
+        let message = `${statusEmoji} <b>Сканирование завершено</b>\n` +
+          `Статус: <code>${summary.status}</code>\n` +
+          `Сообщение: ${summary.message}\n\n` +
+          `📊 <b>Итоги:</b>\n` +
+          `🏢 Квартир: ${summary.apartmentsScanned} (новых: ${summary.newApartments})\n` +
+          `📝 Начислений: ${summary.accrualsObserved} (новых: ${summary.newAccruals})\n` +
+          `📄 Инвойсов: ${summary.invoicesObserved} (новых: ${summary.newInvoices})`;
+          
+        if (summary.needsLogin) {
+            message += '\n\n🔑 <b>Требуется повторная авторизация!</b>';
+        }
+
+        // Fetch apartments to find ones with debt
+        const apartments = await firstValueFrom(this.accountantClient.send<Apartment[]>('get_apartments', {}));
+        const withDebt = (apartments || []).filter(apt => {
+          const balance = (apt.accounts || []).reduce((sum, acc) => sum + (Number(acc.balance) || 0), 0);
+          return balance < -0.01; // Small threshold for floating point
+        });
+
+        const buttons = [];
+        if (withDebt.length > 0) {
+          message += '\n\n🔴 <b>Обнаружена задолженность:</b>';
+          for (const apt of withDebt) {
+             const balance = (apt.accounts || []).reduce((sum, acc) => sum + (Number(acc.balance) || 0), 0);
+             message += `\n• ${apt.address}: <b>${Math.abs(balance).toFixed(2)}</b>`;
+             buttons.push([Markup.button.callback(`🏠 ${apt.address || apt.externalId}`, `admin_apt_menu_${apt.id}`)]);
+          }
+        } else {
+          message += '\n\n🟢 Задолженностей не обнаружено.';
+        }
+
+        await ctx.reply(message, { 
+          parse_mode: 'HTML',
+          ...Markup.inlineKeyboard(buttons)
+        });
+      } catch (e) {
+        this.logger.error('Failed to run scan', e);
+        await ctx.reply('❌ Ошибка при запуске сканирования. Проверьте логи сервиса watcher.');
+      }
     });
 
     // Action: List Apartments

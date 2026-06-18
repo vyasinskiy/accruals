@@ -140,6 +140,7 @@ export class TelegramBotController {
 
   @EventPattern('invoice_available')
   async handleInvoiceAvailable(@Payload() data: { 
+    id: number;
     periodLabel: string; 
     apartmentId: number;
     chatId?: string;
@@ -169,10 +170,38 @@ export class TelegramBotController {
 
     if (!targetChatId) return;
 
+    try {
+      const existingPublication = await this.prisma.publishedInvoice.findUnique({
+        where: {
+          invoiceId_chatId: {
+            invoiceId: data.id,
+            chatId: targetChatId
+          }
+        }
+      });
+      if (existingPublication) {
+        this.logger.log(`Invoice ${data.id} already sent to chat ${targetChatId}. Skipping notification.`);
+        return;
+      }
+    } catch (e: any) {
+      this.logger.error(`Failed to check invoice publication status: ${e.message}`);
+    }
+
     const message = `📄 <b>Доступна новая квитанция!</b>\n\n` +
       `Период: ${data.periodLabel}\n` +
       `Адрес: ${apartmentAddress}`;
 
-    await this.botService.sendNotification(message, targetChatId);
+    try {
+      await this.botService.sendNotification(message, targetChatId);
+      await this.prisma.publishedInvoice.create({
+        data: {
+          invoiceId: data.id,
+          chatId: targetChatId
+        }
+      });
+      this.logger.log(`Notification for invoice ${data.id} sent to chat ${targetChatId} and logged.`);
+    } catch (err: any) {
+      this.logger.error(`Failed to send invoice notification to Telegram: ${err.message}`);
+    }
   }
 }

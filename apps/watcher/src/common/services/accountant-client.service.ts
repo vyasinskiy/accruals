@@ -38,10 +38,16 @@ export class AccountantClientService {
     }
   }
 
-  async findAccruals(filters: { accountExternalId?: string; periodLabel?: string }) {
+  async findAccruals(filters: { accountExternalId?: string | string[]; periodLabel?: string }) {
     const url = new URL('/accountant/accruals', config.ACCOUNTANT_API_URL);
     Object.entries(filters).forEach(([key, value]) => {
-      if (value) url.searchParams.set(key, String(value));
+      if (value !== undefined) {
+        if (Array.isArray(value)) {
+          value.forEach(v => url.searchParams.append(key, String(v)));
+        } else {
+          url.searchParams.set(key, String(value));
+        }
+      }
     });
 
     try {
