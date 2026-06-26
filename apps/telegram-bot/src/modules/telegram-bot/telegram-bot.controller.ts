@@ -4,6 +4,7 @@ import { TelegramBotNotificationService } from './telegram-bot-notification.serv
 import { Markup } from 'telegraf';
 import { firstValueFrom } from 'rxjs';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { config } from '../../common/config/config';
 
 @Controller()
 export class TelegramBotController {
@@ -202,6 +203,81 @@ export class TelegramBotController {
       this.logger.log(`Notification for invoice ${data.id} sent to chat ${targetChatId} and logged.`);
     } catch (err: any) {
       this.logger.error(`Failed to send invoice notification to Telegram: ${err.message}`);
+    }
+  }
+
+  @EventPattern('scan_completed')
+  async handleScanCompleted(@Payload() data: {
+    startedAt: string;
+    finishedAt: string;
+    trigger: 'manual' | 'cron';
+    status: 'success' | 'warning' | 'needs_login' | 'error';
+    message: string;
+    apartmentsScanned: number;
+    accrualsObserved: number;
+    invoicesObserved: number;
+    newApartments: number;
+    newAccruals: number;
+    newInvoices: number;
+    needsLogin: boolean;
+  }) {
+    const started = new Date(data.startedAt);
+    const finished = new Date(data.finishedAt);
+    const durationSeconds = Math.max(0, Math.round((finished.getTime() - started.getTime()) / 1000));
+
+    const statusEmojis = {
+      success: '✅',
+      warning: '⚠️',
+      needs_login: '🔑',
+      error: '❌',
+    };
+    const statusTexts = {
+      success: 'Успешно',
+      warning: 'Предупреждение',
+      needs_login: 'Требуется авторизация',
+      error: 'Ошибка',
+    };
+
+    const triggerTexts = {
+      manual: 'Вручную',
+      cron: 'По расписанию',
+    };
+
+    const statusEmoji = statusEmojis[data.status] || '❓';
+    const statusText = statusTexts[data.status] || data.status;
+    const triggerText = triggerTexts[data.trigger] || data.trigger;
+
+    let message = `🔍 <b>Результаты сканирования</b>\n\n` +
+      `📊 <b>Статус:</b> ${statusEmoji} ${statusText}\n` +
+      `🚀 <b>Триггер:</b> ${triggerText}\n` +
+      `⏱ <b>Длительность:</b> ${durationSeconds} сек.\n\n` +
+      `🏢 <b>Квартиры:</b> ${data.apartmentsScanned} (новых: ${data.newApartments})\n` +
+      `💵 <b>Начисления:</b> ${data.accrualsObserved} (новых: ${data.newAccruals})\n` +
+      `📄 <b>Квитанции:</b> ${data.invoicesObserved} (новых: ${data.newInvoices})\n`;
+
+    if (data.message) {
+      message += `\n💬 <b>Сообщение:</b> ${data.message}`;
+    }
+
+    try {
+      const admins = await this.prisma.user.findMany({ where: { role: 'admin' } });
+      const targetChatIds = new Set<string>();
+      for (const admin of admins) {
+        targetChatIds.add(admin.telegramId.toString());
+      }
+      if (config.SUPER_ADMIN_TELEGRAM_ID) {
+        targetChatIds.add(config.SUPER_ADMIN_TELEGRAM_ID);
+      }
+
+      for (const chatId of targetChatIds) {
+        try {
+          await this.botService.sendAdminNotification(message, chatId);
+        } catch (err: any) {
+          this.logger.error(`Failed to send scan notification to ${chatId}: ${err.message}`);
+        }
+      }
+    } catch (e: any) {
+      this.logger.error(`Failed to retrieve admins for scan completed notification: ${e.message}`);
     }
   }
 }

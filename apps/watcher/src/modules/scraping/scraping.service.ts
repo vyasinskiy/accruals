@@ -17,7 +17,8 @@ export class ScrapingService {
   constructor(
     private readonly accountantClientService: AccountantClientService,
     private readonly prisma: PrismaService,
-    @Inject('ACCOUNTANT_SERVICE') private readonly accountantClient: ClientProxy
+    @Inject('ACCOUNTANT_SERVICE') private readonly accountantClient: ClientProxy,
+    @Inject('NOTIFICATIONS_SERVICE') private readonly notificationsClient: ClientProxy
   ) {}
 
   async bootstrapSession(): Promise<void> {
@@ -332,6 +333,8 @@ export class ScrapingService {
         summaryJson: JSON.stringify(summary)
       }
     });
+
+    this.notificationsClient.emit('scan_completed', summary);
 
     return summary;
   }

@@ -14,6 +14,7 @@ describe('ScrapingService', () => {
   let accountantClientService: AccountantClientService;
   let prismaService: PrismaService;
   let accountantClient: ClientProxy;
+  let notificationsClient: ClientProxy;
 
   const mockAccountantClientService = {
     findApartments: jest.fn(),
@@ -33,6 +34,10 @@ describe('ScrapingService', () => {
     send: jest.fn().mockReturnValue(of({})),
   };
 
+  const mockNotificationsClient = {
+    emit: jest.fn(),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -40,6 +45,7 @@ describe('ScrapingService', () => {
         { provide: AccountantClientService, useValue: mockAccountantClientService },
         { provide: PrismaService, useValue: mockPrismaService },
         { provide: 'ACCOUNTANT_SERVICE', useValue: mockAccountantClient },
+        { provide: 'NOTIFICATIONS_SERVICE', useValue: mockNotificationsClient },
       ],
     }).compile();
 
@@ -47,6 +53,7 @@ describe('ScrapingService', () => {
     accountantClientService = module.get<AccountantClientService>(AccountantClientService);
     prismaService = module.get<PrismaService>(PrismaService);
     accountantClient = module.get<ClientProxy>('ACCOUNTANT_SERVICE');
+    notificationsClient = module.get<ClientProxy>('NOTIFICATIONS_SERVICE');
 
     jest.clearAllMocks();
     (fs.existsSync as jest.Mock).mockReturnValue(true);
