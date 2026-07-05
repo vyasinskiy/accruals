@@ -5,6 +5,7 @@ import { MicroserviceOptions, Transport } from '@nestjs/microservices';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { config } from './config';
 import { AppModule } from './app.module';
+import { printSwaggerUrl } from './common/utils/swagger';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule);
@@ -34,7 +35,7 @@ async function bootstrap(): Promise<void> {
   await app.listen(config.PORT);
   console.log(`kvartplata-watcher listening on http://localhost:${config.PORT}`);
   console.log('kvartplata-watcher RMQ microservice is listening...');
-  console.log(`Swagger UI: http://localhost:${config.PORT}/docs`);
+  printSwaggerUrl();
 }
 
 bootstrap().catch((error) => {

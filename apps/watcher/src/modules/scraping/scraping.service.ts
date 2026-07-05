@@ -9,6 +9,7 @@ import { config } from '../../config';
 import type { AccrualSnapshot, ApartmentSnapshot, AccountSnapshot, InvoiceSnapshot, ScanSummary } from '../../types';
 import { KvartplataAdapter } from './adapter';
 import { ManualScanDto } from './dto/manual-scan.dto';
+import { printSwaggerUrl } from '../../common/utils/swagger';
 
 @Injectable()
 export class ScrapingService {
@@ -99,7 +100,7 @@ export class ScrapingService {
       }
 
       if (needsLogin) {
-        return await this.finalize(runId, {
+        const summary = await this.finalize(runId, {
           startedAt: startedAt.toISOString(),
           finishedAt: new Date().toISOString(),
           trigger,
@@ -113,6 +114,8 @@ export class ScrapingService {
           newInvoices: 0,
           needsLogin: true
         });
+        printSwaggerUrl(log);
+        return summary;
       }
 
       apartments = dedupe(apartments, (item) => item.externalId);
@@ -282,6 +285,7 @@ export class ScrapingService {
       });
 
       log(`Run finished with status=${summary.status}`);
+      printSwaggerUrl(log);
       return summary;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -289,7 +293,7 @@ export class ScrapingService {
       
       try {
         if (runId !== undefined) {
-          return await this.finalize(runId, {
+          const finalSummary = await this.finalize(runId, {
             startedAt: startedAt.toISOString(),
             finishedAt: new Date().toISOString(),
             trigger,
@@ -303,10 +307,13 @@ export class ScrapingService {
             newInvoices: 0,
             needsLogin: false
           });
+          printSwaggerUrl(log);
+          return finalSummary;
         }
       } catch (finalizeError) {
           log(`Final fatal error (could not even finalize run): ${finalizeError instanceof Error ? finalizeError.message : String(finalizeError)}`);
       }
+      printSwaggerUrl(log);
       throw error;
     }
   }

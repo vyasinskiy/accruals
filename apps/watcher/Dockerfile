@@ -21,4 +21,4 @@ RUN npm run build && cp -a src/generated dist/
 
 # Start the application.
 # DB is pushed via deploy.sh or manually.
-CMD ["npm", "run", "start"]
+CMD ["npm", "run", "start:prod"]
