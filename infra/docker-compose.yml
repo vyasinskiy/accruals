@@ -34,6 +34,8 @@ services:
   visual-browser:
     image: lscr.io/linuxserver/chromium:latest
     container_name: accruals-visual-browser
+    profiles:
+      - manual
     security_opt:
       - seccomp:unconfined
     environment:

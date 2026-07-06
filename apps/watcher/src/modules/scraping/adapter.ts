@@ -182,10 +182,25 @@ export class KvartplataAdapter {
 
   async downloadInvoice(url: string): Promise<Buffer> {
     const { chromium } = await import('playwright');
-    const browser = await chromium.launch({ headless: config.HEADLESS });
-    const context = await browser.newContext({
-      storageState: fs.existsSync(config.storageStatePath) ? config.storageStatePath : undefined
-    });
+    let browser: any = null;
+    let context: BrowserContext;
+
+    if (config.BROWSER_PROFILE_PATH && !config.BROWSER_WS_ENDPOINT) {
+      context = await chromium.launchPersistentContext(config.BROWSER_PROFILE_PATH, {
+        headless: config.HEADLESS,
+        acceptDownloads: true
+      });
+    } else {
+      browser = config.BROWSER_WS_ENDPOINT
+        ? await chromium.connectOverCDP(config.BROWSER_WS_ENDPOINT)
+        : await chromium.launch({ headless: config.HEADLESS });
+      
+      context = await browser.newContext({
+        storageState: fs.existsSync(config.storageStatePath) ? config.storageStatePath : undefined,
+        acceptDownloads: true
+      });
+    }
+
     const page = await context.newPage();
     try {
       const response = await page.request.get(url, {
@@ -196,7 +211,11 @@ export class KvartplataAdapter {
       }
       return await response.body();
     } finally {
-      await browser.close();
+      if (browser) {
+        await browser.close();
+      } else {
+        await context.close();
+      }
     }
   }
 
