@@ -44,7 +44,7 @@ const schema = z.object({
   ACCOUNTANT_QUEUE: z.string().default('accountant_queue'),
   WATCHER_QUEUE: z.string().default('watcher_queue'),
   ACCOUNTANT_API_URL: z.string().url().default('http://localhost:3005'),
-  SCRAPE_CRON: z.string().default('0 9 * * *'),
+  SCRAPE_CRON: z.string().default('0 9 * * *'), // 9:00 AM every day
   TZ: z.string().default('Europe/Madrid')
 });
 

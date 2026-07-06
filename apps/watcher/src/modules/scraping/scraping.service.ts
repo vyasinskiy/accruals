@@ -1,8 +1,9 @@
 import fs from 'node:fs';
 import { lastValueFrom } from 'rxjs';
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, OnApplicationBootstrap } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
 import { Cron } from '@nestjs/schedule';
+import parser from 'cron-parser';
 import { AccountantClientService } from '../../common/services/accountant-client.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { config } from '../../config';
@@ -12,7 +13,7 @@ import { ManualScanDto } from './dto/manual-scan.dto';
 import { printSwaggerUrl } from '../../common/utils/swagger';
 
 @Injectable()
-export class ScrapingService {
+export class ScrapingService implements OnApplicationBootstrap {
   private readonly adapter = new KvartplataAdapter();
 
   constructor(
@@ -20,10 +21,22 @@ export class ScrapingService {
     private readonly prisma: PrismaService,
     @Inject('ACCOUNTANT_SERVICE') private readonly accountantClient: ClientProxy,
     @Inject('NOTIFICATIONS_SERVICE') private readonly notificationsClient: ClientProxy
-  ) {}
+  ) { }
 
   async bootstrapSession(): Promise<void> {
     await this.adapter.bootstrap();
+  }
+
+  async onApplicationBootstrap(): Promise<void> {
+    // Delay check for 10 seconds to allow time synchronization inside VM
+    setTimeout(async () => {
+      console.log('[bootstrap] Checking for missed scheduled scans...');
+      try {
+        await this.checkAndRunMissedScan();
+      } catch (error) {
+        console.error('[bootstrap] Failed during bootstrap missed scan check:', error);
+      }
+    }, 10000);
   }
 
   @Cron(config.SCRAPE_CRON, { timeZone: config.TZ })
@@ -31,6 +44,33 @@ export class ScrapingService {
     console.log(`[cron] Starting scheduled scan (schedule: ${config.SCRAPE_CRON})`);
     return this.scan({ trigger: 'cron' });
   }
+
+  @Cron('0 * * * *', { timeZone: config.TZ })
+  async checkAndRunMissedScan(): Promise<void> {
+    try {
+      const options = {
+        currentDate: new Date(),
+        tz: config.TZ
+      };
+      const interval = parser.parseExpression(config.SCRAPE_CRON, options);
+      const prevDate = interval.prev().toDate();
+
+      const lastSuccessfulRun = await this.prisma.run.findFirst({
+        where: {
+          status: { in: ['success', 'warning'] },
+          startedAt: { gte: prevDate }
+        }
+      });
+
+      if (!lastSuccessfulRun) {
+        console.log('[cron] No successful run found after the last scheduled time. Triggering missed scan...');
+        await this.scan({ trigger: 'cron' });
+      }
+    } catch (error) {
+      console.error('[cron] Failed during missed scan check:', error);
+    }
+  }
+
 
   async scan(input: ManualScanDto = {}): Promise<ScanSummary> {
     const startedAt = new Date();
@@ -149,8 +189,8 @@ export class ScrapingService {
       // Optimized: Fetch all already uploaded invoices for these accounts to avoid N+1 requests
       const accountIds = accounts.map(a => a.externalId);
       const existingUploadedInvoices = await this.accountantClientService.findInvoices({
-          accountExternalId: accountIds,
-          uploadedToS3: true
+        accountExternalId: accountIds,
+        uploadedToS3: true
       });
       const uploadedMap = new Set(existingUploadedInvoices.map((inv: any) => `${inv.accountExternalId}_${inv.periodId}`));
 
@@ -163,28 +203,28 @@ export class ScrapingService {
               skippedInvoices++;
             } else {
               const { url, key } = await this.accountantClientService.getUploadUrl(invoice.accountExternalId, invoice.periodLabel);
-              
+
               log(`Downloading invoice: ${invoice.periodLabel} (${invoice.accountExternalId})`);
               const pdfBuffer = await this.adapter.downloadInvoice(invoice.invoiceUrl);
 
               try {
-                  const uploadResponse = await fetch(url, {
-                      method: 'PUT',
-                      body: new Uint8Array(pdfBuffer),
-                      headers: { 'Content-Type': 'application/pdf' }
-                  });
+                const uploadResponse = await fetch(url, {
+                  method: 'PUT',
+                  body: new Uint8Array(pdfBuffer),
+                  headers: { 'Content-Type': 'application/pdf' }
+                });
 
-                  if (!uploadResponse.ok) {
-                      throw new Error(`S3 upload failed with status ${uploadResponse.status}: ${uploadResponse.statusText}`);
-                  }
-                  log(`Successfully uploaded to S3: ${invoice.periodLabel} (${key})`);
+                if (!uploadResponse.ok) {
+                  throw new Error(`S3 upload failed with status ${uploadResponse.status}: ${uploadResponse.statusText}`);
+                }
+                log(`Successfully uploaded to S3: ${invoice.periodLabel} (${key})`);
               } catch (fetchError: any) {
-                  const detailedMsg = [
-                      fetchError.message,
-                      fetchError.cause?.code ? `[Code: ${fetchError.cause.code}]` : null,
-                      fetchError.cause?.message ? `(Cause: ${fetchError.cause.message})` : null
-                  ].filter(Boolean).join(' ');
-                  throw new Error(`Network error during S3 upload to ${url}: ${detailedMsg}`, { cause: fetchError });
+                const detailedMsg = [
+                  fetchError.message,
+                  fetchError.cause?.code ? `[Code: ${fetchError.cause.code}]` : null,
+                  fetchError.cause?.message ? `(Cause: ${fetchError.cause.message})` : null
+                ].filter(Boolean).join(' ');
+                throw new Error(`Network error during S3 upload to ${url}: ${detailedMsg}`, { cause: fetchError });
               }
 
               // 4. Enrich metadata
@@ -203,9 +243,9 @@ export class ScrapingService {
             uploadErrors.push(errorMsg);
           }
         }
-        
+
         if (shouldUpsert) {
-            this.accountantClient.emit('upsert_invoice', invoice);
+          this.accountantClient.emit('upsert_invoice', invoice);
         }
       }
 
@@ -221,7 +261,7 @@ export class ScrapingService {
       log(`Invoices discovered: ${invoices.length}`);
       log(`${green}Successfully processed/uploaded: ${uploadedInvoicesCount}${reset}`);
       log(`${yellow}Skipped (already in S3): ${skippedInvoices}${reset}`);
-      
+
       if (uploadErrors.length > 0) {
         log(`${red}Errors encountered: ${uploadErrors.length}${reset}`);
         for (const error of uploadErrors) {
@@ -290,7 +330,7 @@ export class ScrapingService {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       log(`Run failed: ${message}`);
-      
+
       try {
         if (runId !== undefined) {
           const finalSummary = await this.finalize(runId, {
@@ -311,7 +351,7 @@ export class ScrapingService {
           return finalSummary;
         }
       } catch (finalizeError) {
-          log(`Final fatal error (could not even finalize run): ${finalizeError instanceof Error ? finalizeError.message : String(finalizeError)}`);
+        log(`Final fatal error (could not even finalize run): ${finalizeError instanceof Error ? finalizeError.message : String(finalizeError)}`);
       }
       printSwaggerUrl(log);
       throw error;
