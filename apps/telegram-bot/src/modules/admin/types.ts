@@ -2,17 +2,9 @@ export interface User {
   id: number;
   name?: string;
   role: string;
+  telegramId?: string;
   createdAt: string;
-  identities?: UserIdentity[];
   tenantProfile?: Tenant;
-}
-
-export interface UserIdentity {
-  id: number;
-  userId: number;
-  platform: string;
-  externalId: string;
-  createdAt: string;
 }
 
 export interface Tenant {

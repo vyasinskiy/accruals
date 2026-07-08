@@ -19,12 +19,10 @@ export class TenantService {
   }
 
   async addPayment(data: { telegramId: string | number; amount: number; receiptPhotoId?: string; isPaidToday: boolean }) {
-    const identity = await this.prisma.userIdentity.findUnique({
-      where: { platform_externalId: { platform: 'telegram', externalId: data.telegramId.toString() } },
-      include: { user: { include: { tenantProfile: { include: { apartment: true } } } } }
+    const user = await this.prisma.user.findUnique({
+      where: { telegramId: BigInt(data.telegramId) },
+      include: { tenantProfile: { include: { apartment: true } } }
     });
-
-    const user = identity?.user;
 
     if (!user || !user.tenantProfile) {
       throw new NotFoundException('Tenant not found');
@@ -57,12 +55,10 @@ export class TenantService {
   }
 
   async getInvoices(telegramId: string | number) {
-    const identity = await this.prisma.userIdentity.findUnique({
-      where: { platform_externalId: { platform: 'telegram', externalId: telegramId.toString() } },
-      include: { user: { include: { tenantProfile: { include: { apartment: { include: { accounts: true } } } } } } }
+    const user = await this.prisma.user.findUnique({
+      where: { telegramId: BigInt(telegramId) },
+      include: { tenantProfile: { include: { apartment: { include: { accounts: true } } } } }
     });
-
-    const user = identity?.user;
 
     if (!user || !user.tenantProfile) {
       throw new NotFoundException('Tenant not found');
@@ -83,12 +79,10 @@ export class TenantService {
   }
 
   async getCurrentDebt(telegramId: string | number) {
-    const identity = await this.prisma.userIdentity.findUnique({
-      where: { platform_externalId: { platform: 'telegram', externalId: telegramId.toString() } },
-      include: { user: { include: { tenantProfile: { include: { apartment: { include: { accounts: true } } } } } } }
+    const user = await this.prisma.user.findUnique({
+      where: { telegramId: BigInt(telegramId) },
+      include: { tenantProfile: { include: { apartment: { include: { accounts: true } } } } }
     });
-
-    const user = identity?.user;
 
     if (!user || !user.tenantProfile) {
       throw new NotFoundException('Tenant not found');

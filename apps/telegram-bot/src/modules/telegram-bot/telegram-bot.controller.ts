@@ -115,11 +115,8 @@ export class TelegramBotController {
         
         if (!targetChatId) {
           const user = await firstValueFrom(this.accountantClient.send('get_tenant_by_apartment', data.apartmentId));
-          if (user && user.identities) {
-            const tgIdentity = user.identities.find((i: any) => i.platform === 'telegram');
-            if (tgIdentity) {
-              targetChatId = tgIdentity.externalId;
-            }
+          if (user && user.telegramId) {
+            targetChatId = user.telegramId.toString();
           }
         }
       }
@@ -156,11 +153,8 @@ export class TelegramBotController {
         
         if (!targetChatId) {
           const user = await firstValueFrom(this.accountantClient.send('get_tenant_by_apartment', data.apartmentId));
-          if (user && user.identities) {
-            const tgIdentity = user.identities.find((i: any) => i.platform === 'telegram');
-            if (tgIdentity) {
-              targetChatId = tgIdentity.externalId;
-            }
+          if (user && user.telegramId) {
+            targetChatId = user.telegramId.toString();
           }
         }
       }
@@ -172,10 +166,10 @@ export class TelegramBotController {
     if (!targetChatId) return;
 
     try {
-      const existingPublication = await this.prisma.publishedInvoice.findUnique({
+      const existingPublication = await this.prisma.publication.findFirst({
         where: {
-          invoiceId_chatId: {
-            invoiceId: data.id,
+          invoiceId: data.id,
+          channel: {
             chatId: targetChatId
           }
         }
@@ -194,10 +188,15 @@ export class TelegramBotController {
 
     try {
       await this.botService.sendNotification(message, targetChatId);
-      await this.prisma.publishedInvoice.create({
+      await this.prisma.publication.create({
         data: {
           invoiceId: data.id,
-          chatId: targetChatId
+          channel: {
+            connectOrCreate: {
+              where: { chatId: targetChatId },
+              create: { chatId: targetChatId }
+            }
+          }
         }
       });
       this.logger.log(`Notification for invoice ${data.id} sent to chat ${targetChatId} and logged.`);

@@ -28,7 +28,7 @@ export class TenantReminderService {
           rentAmount: { not: null }
         },
         include: {
-          user: { include: { identities: true } },
+          user: true,
           apartment: true
         }
       });
@@ -39,15 +39,13 @@ export class TenantReminderService {
       }
 
       for (const tenant of tenantsToRemind) {
-        const tgIdentity = tenant.user.identities.find(i => i.platform === 'telegram');
-        
-        if (tgIdentity && tenant.rentAmount) {
+        if (tenant.user.telegramId && tenant.rentAmount) {
           this.notificationsClient.emit('remind_rent_payment', {
-            chatId: tgIdentity.externalId,
+            chatId: tenant.user.telegramId.toString(),
             rentAmount: tenant.rentAmount.toString(),
             apartmentAddress: tenant.apartment?.address || 'Неизвестно'
           });
-          this.logger.log(`Sent reminder event for tenant ${tenant.id} (Chat ID: ${tgIdentity.externalId})`);
+          this.logger.log(`Sent reminder event for tenant ${tenant.id} (Chat ID: ${tenant.user.telegramId.toString()})`);
         }
       }
     } catch (error) {

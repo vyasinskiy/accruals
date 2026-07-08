@@ -259,17 +259,17 @@ export class AccountantService {
   }
 
   async createPayment(data: { telegramId: number | string; userName: string; amount: number; receiptPhotoId: string | null }) {
-    const identity = await this.prisma.userIdentity.findUnique({
-      where: { platform_externalId: { platform: 'telegram', externalId: data.telegramId.toString() } }
+    const user = await this.prisma.user.findUnique({
+      where: { telegramId: BigInt(data.telegramId) }
     });
 
-    if (!identity) {
+    if (!user) {
       throw new Error(`User with Telegram ID ${data.telegramId} not found in accounting system.`);
     }
 
     const result = await this.prisma.payment.create({
       data: {
-        userId: identity.userId,
+        userId: user.id,
         userName: data.userName,
         amount: data.amount,
         receiptPhotoId: data.receiptPhotoId,
@@ -441,8 +441,7 @@ export class AccountantService {
 
   async findTenantByApartment(apartmentId: number) {
     const tenant = await this.prisma.user.findFirst({
-      where: { tenantProfile: { apartmentId, status: 'active' } },
-      include: { identities: true }
+      where: { tenantProfile: { apartmentId, status: 'active' } }
     });
     return this.serialize(tenant);
   }
@@ -450,7 +449,6 @@ export class AccountantService {
   async findAllUsers() {
     const users = await this.prisma.user.findMany({
       include: {
-        identities: true,
         tenantProfile: {
           include: { apartment: true }
         }

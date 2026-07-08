@@ -18,6 +18,6 @@ export class UsersController {
 
   @MessagePattern('delete_user_by_tg')
   async deleteUserByTg(@Payload() data: { telegramId: string }) {
-    return this.usersService.deleteUserByPlatformIdentity('telegram', data.telegramId);
+    return this.usersService.deleteUserByTelegramId(data.telegramId);
   }
 }

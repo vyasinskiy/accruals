@@ -19,30 +19,20 @@ export class TenantRegistrationService {
   }
 
   async registerTenant(data: { name: string; telegramId: string | number; platform?: string; apartmentId?: number; rentPaymentDay?: number; phone?: string }) {
-    const platform = data.platform || 'telegram';
-    const externalId = data.telegramId.toString();
+    const tgId = BigInt(data.telegramId);
 
-    let identity = await this.prisma.userIdentity.findUnique({
-      where: { platform_externalId: { platform, externalId } },
-      include: { user: true }
+    let user = await this.prisma.user.findUnique({
+      where: { telegramId: tgId }
     });
 
-    let user;
-    if (!identity) {
+    if (!user) {
       user = await this.prisma.user.create({
         data: {
           name: data.name,
           role: 'tenant',
-          identities: {
-            create: {
-              platform,
-              externalId
-            }
-          }
+          telegramId: tgId
         }
       });
-    } else {
-      user = identity.user;
     }
 
     const existingProfile = await this.prisma.tenant.findUnique({
@@ -77,14 +67,13 @@ export class TenantRegistrationService {
     const tenant = await this.prisma.tenant.update({
       where: { id: tenantId },
       data: { status: 'active' },
-      include: { user: { include: { identities: true } } }
+      include: { user: true }
     });
     
     // Optionally notify the tenant that they are approved
-    const tgIdentity = tenant.user.identities.find(i => i.platform === 'telegram');
-    if (tgIdentity) {
+    if (tenant.user.telegramId) {
       this.notificationsClient.emit('tenant_activated', {
-          chatId: tgIdentity.externalId
+          chatId: tenant.user.telegramId.toString()
       });
     }
 
@@ -116,14 +105,13 @@ export class TenantRegistrationService {
         rentAmount,
         status: 'active'
       },
-      include: { user: { include: { identities: true } }, apartment: true }
+      include: { user: true, apartment: true }
     });
 
     // Notify the tenant that they are approved
-    const tgIdentity = tenant.user.identities.find(i => i.platform === 'telegram');
-    if (tgIdentity) {
+    if (tenant.user.telegramId) {
       this.notificationsClient.emit('tenant_activated', {
-          chatId: tgIdentity.externalId,
+          chatId: tenant.user.telegramId.toString(),
           apartmentAddress: tenant.apartment?.address || 'Неизвестно',
           rentPaymentDay,
           rentAmount: rentAmount ? rentAmount.toString() : undefined
@@ -134,10 +122,10 @@ export class TenantRegistrationService {
   }
 
   async getTenantByTelegramId(telegramId: string | number) {
-    const identity = await this.prisma.userIdentity.findUnique({
-      where: { platform_externalId: { platform: 'telegram', externalId: telegramId.toString() } },
-      include: { user: { include: { tenantProfile: { include: { apartment: { include: { accounts: true } } } } } } }
+    const user = await this.prisma.user.findUnique({
+      where: { telegramId: BigInt(telegramId) },
+      include: { tenantProfile: { include: { apartment: { include: { accounts: true } } } } }
     });
-    return identity ? this.serialize(identity.user) : null;
+    return user ? this.serialize(user) : null;
   }
 }

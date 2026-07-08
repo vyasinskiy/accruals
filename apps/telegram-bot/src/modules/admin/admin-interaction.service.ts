@@ -507,9 +507,8 @@ export class AdminInteractionService {
         await ctx.answerCbQuery();
         
         const message = '📋 <b>Список пользователей:</b>\nВыберите пользователя для управления:';
-        const buttons = allAccUsers.map((u) => {
-           const tgIdentity = u.identities?.find((i) => i.platform === 'telegram');
-           const tgId = tgIdentity?.externalId;
+         const buttons = allAccUsers.map((u) => {
+            const tgId = u.telegramId;
            const roleStr = u.role === 'admin' ? '🛡' : '👤';
            const name = u.name || (tgId ? `ID:${tgId}` : 'Неизвестно');
            
@@ -536,8 +535,7 @@ export class AdminInteractionService {
             const u = allAccUsers.find(user => user.id === userId);
             if (!u) return ctx.answerCbQuery('Пользователь не найден');
 
-            const tgIdentity = u.identities?.find((i) => i.platform === 'telegram');
-            const tgId = tgIdentity?.externalId;
+             const tgId = u.telegramId;
             const roleStr = u.role === 'admin' ? 'Администратор' : 'Арендатор';
             const isSuperAdmin = tgId === config.SUPER_ADMIN_TELEGRAM_ID;
 

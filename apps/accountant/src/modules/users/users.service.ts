@@ -10,33 +10,27 @@ export class UsersService implements OnModuleInit {
 
   async onModuleInit() {
     if (config.SUPER_ADMIN_TELEGRAM_ID) {
-      const externalId = config.SUPER_ADMIN_TELEGRAM_ID.toString();
+      const tgId = BigInt(config.SUPER_ADMIN_TELEGRAM_ID);
 
-      const identity = await this.prisma.userIdentity.findUnique({
-        where: { platform_externalId: { platform: 'telegram', externalId } },
-        include: { user: true }
+      const user = await this.prisma.user.findUnique({
+        where: { telegramId: tgId }
       });
 
-      if (!identity) {
+      if (!user) {
         await this.prisma.user.create({
           data: {
             name: 'Super Admin',
             role: 'admin',
-            identities: {
-              create: {
-                platform: 'telegram',
-                externalId
-              }
-            }
+            telegramId: tgId
           },
         });
-        this.logger.log(`Super Admin user created with Telegram ID: ${externalId}`);
-      } else if (identity.user.role !== 'admin') {
+        this.logger.log(`Super Admin user created with Telegram ID: ${tgId}`);
+      } else if (user.role !== 'admin') {
         await this.prisma.user.update({
-          where: { id: identity.userId },
+          where: { id: user.id },
           data: { role: 'admin' },
         });
-        this.logger.log(`Updated user ${externalId} role to admin`);
+        this.logger.log(`Updated user ${tgId} role to admin`);
       }
     }
   }
@@ -57,8 +51,7 @@ export class UsersService implements OnModuleInit {
   async getAllUsers() {
     const users = await this.prisma.user.findMany({
       include: { 
-        tenantProfile: { include: { apartment: true } },
-        identities: true
+        tenantProfile: { include: { apartment: true } }
       },
       orderBy: { createdAt: 'desc' }
     });
@@ -67,11 +60,10 @@ export class UsersService implements OnModuleInit {
 
   async deleteUser(userId: number) {
     const user = await this.prisma.user.findUnique({
-      where: { id: userId },
-      include: { identities: true }
+      where: { id: userId }
     });
 
-    if (user?.identities.some(i => i.platform === 'telegram' && i.externalId === config.SUPER_ADMIN_TELEGRAM_ID)) {
+    if (user?.telegramId && user.telegramId.toString() === config.SUPER_ADMIN_TELEGRAM_ID) {
       throw new Error('Cannot delete Super Admin user');
     }
 
@@ -81,28 +73,28 @@ export class UsersService implements OnModuleInit {
     return this.serialize(deletedUser);
   }
 
-  async deleteUserByPlatformIdentity(platform: string, externalId: string) {
-    if (platform === 'telegram' && externalId === config.SUPER_ADMIN_TELEGRAM_ID) {
+  async deleteUserByTelegramId(telegramId: string) {
+    if (telegramId === config.SUPER_ADMIN_TELEGRAM_ID) {
       throw new Error('Cannot delete Super Admin user');
     }
 
-    const identity = await this.prisma.userIdentity.findUnique({
-      where: { platform_externalId: { platform, externalId } }
+    const user = await this.prisma.user.findUnique({
+      where: { telegramId: BigInt(telegramId) }
     });
 
-    if (!identity) return null;
+    if (!user) return null;
 
-    const user = await this.prisma.user.delete({
-      where: { id: identity.userId }
+    const deletedUser = await this.prisma.user.delete({
+      where: { id: user.id }
     });
-    return this.serialize(user);
+    return this.serialize(deletedUser);
   }
 
   async findByTelegramId(telegramId: string | number | bigint) {
-    const identity = await this.prisma.userIdentity.findUnique({
-      where: { platform_externalId: { platform: 'telegram', externalId: telegramId.toString() } },
-      include: { user: { include: { tenantProfile: true } } }
+    const user = await this.prisma.user.findUnique({
+      where: { telegramId: BigInt(telegramId) },
+      include: { tenantProfile: true }
     });
-    return identity ? this.serialize(identity.user) : null;
+    return user ? this.serialize(user) : null;
   }
 }

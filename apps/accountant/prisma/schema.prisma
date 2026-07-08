@@ -29,26 +29,13 @@ model User {
   id              Int            @id @default(autoincrement())
   name            String?
   role            String         @default("tenant") // admin, tenant
+  telegramId      BigInt?        @unique @map("telegram_id")
   createdAt       DateTime       @default(now()) @map("created_at")
 
-  identities      UserIdentity[]
   tenantProfile   Tenant?
   payments        Payment[]
 
   @@map("users")
-}
-
-model UserIdentity {
-  id           Int      @id @default(autoincrement())
-  userId       Int      @map("user_id")
-  platform     String   // "telegram", "vk", "web"
-  externalId   String   @map("external_id") // ID inside the platform (e.g. telegramId)
-  createdAt    DateTime @default(now()) @map("created_at")
-
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([platform, externalId])
-  @@map("user_identities")
 }
 
 model Tenant {

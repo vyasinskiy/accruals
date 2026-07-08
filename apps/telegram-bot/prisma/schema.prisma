@@ -20,12 +20,25 @@ model User {
   @@map("users")
 }
 
-model PublishedInvoice {
-  id          Int      @id @default(autoincrement())
-  invoiceId   Int      @map("invoice_id")
-  chatId      String   @map("chat_id")
-  publishedAt DateTime @default(now()) @map("published_at")
+model PublicationChannel {
+  id        Int           @id @default(autoincrement())
+  chatId    String        @unique @map("chat_id")
+  name      String?
+  createdAt DateTime      @default(now()) @map("created_at")
 
-  @@unique([invoiceId, chatId])
-  @@map("published_invoices")
+  publications Publication[]
+
+  @@map("publication_channels")
 }
+
+model Publication {
+  id          Int                @id @default(autoincrement())
+  invoiceId   Int                @map("invoice_id")
+  publishedAt DateTime           @default(now()) @map("published_at")
+  channelId   Int                @map("channel_id")
+  channel     PublicationChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+
+  @@unique([invoiceId, channelId])
+  @@map("publications")
+}
+
