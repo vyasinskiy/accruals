@@ -35,10 +35,7 @@ export class TelegramBotController {
       Markup.button.callback('❌ Отклонить', `reject_payment_${data.paymentId}`)
     ]);
 
-    const admins = await this.prisma.user.findMany({ where: { role: 'admin' } });
-    for (const admin of admins) {
-      await this.botService.sendAdminPhotoNotification(data.receiptPhotoId, message, admin.telegramId.toString(), extra);
-    }
+    await this.notifyAdmins(message, 'payment_created', extra, data.receiptPhotoId);
   }
 
   @EventPattern('tenant_registered')
@@ -57,10 +54,7 @@ export class TelegramBotController {
       Markup.button.callback('❌ Отклонить', `admin_reject_tenant_${data.tenantId}`)
     ]);
 
-    const admins = await this.prisma.user.findMany({ where: { role: 'admin' } });
-    for (const admin of admins) {
-      await this.botService.sendAdminNotification(message, admin.telegramId.toString(), extra);
-    }
+    await this.notifyAdmins(message, 'tenant_registered', extra);
   }
 
   @EventPattern('tenant_activated')
@@ -99,7 +93,9 @@ export class TelegramBotController {
       }
     }
 
+    this.logger.log(`Sending activation notification to tenant chatId ${data.chatId}`);
     await this.botService.sendNotification(message, data.chatId);
+    this.logger.log(`Activation notification sent to tenant chatId ${data.chatId}`);
   }
 
   @EventPattern('remind_rent_payment')
@@ -113,7 +109,9 @@ export class TelegramBotController {
       `Сумма к оплате: ${data.rentAmount}\n\n` +
       `Пожалуйста, не забудьте произвести оплату и отправить чек через бота (кнопка "Добавить оплату").`;
 
+    this.logger.log(`Sending rent reminder notification to tenant chatId ${data.chatId}`);
     await this.botService.sendNotification(message, data.chatId);
+    this.logger.log(`Rent reminder notification sent to tenant chatId ${data.chatId}`);
   }
 
   @EventPattern('accrual_upserted')
@@ -174,7 +172,9 @@ export class TelegramBotController {
 
     for (const chatId of targetChatIds) {
       try {
+        this.logger.log(`Sending accrual notification (period: ${data.periodLabel}) to chat ${chatId}`);
         await this.botService.sendNotification(message, chatId);
+        this.logger.log(`Accrual notification (period: ${data.periodLabel}) sent to chat ${chatId}`);
       } catch (err: any) {
         this.logger.error(`Failed to send accrual notification to chat ${chatId}: ${err.message}`);
       }
@@ -261,6 +261,7 @@ export class TelegramBotController {
           continue;
         }
 
+        this.logger.log(`Sending invoice available notification (invoiceId: ${data.id}, period: ${data.periodLabel}) to chat ${chatId}`);
         await this.botService.sendNotification(message, chatId);
         await this.prisma.publication.create({
           data: {
@@ -328,6 +329,15 @@ export class TelegramBotController {
       message += `\n💬 <b>Сообщение:</b> ${data.message}`;
     }
 
+    await this.notifyAdmins(message, `scan_completed (status: ${data.status})`);
+  }
+
+  private async notifyAdmins(
+    message: string,
+    actionName: string,
+    extra?: any,
+    receiptPhotoId?: string | null
+  ) {
     try {
       const admins = await this.prisma.user.findMany({ where: { role: 'admin' } });
       const targetChatIds = new Set<string>();
@@ -338,15 +348,21 @@ export class TelegramBotController {
         targetChatIds.add(config.SUPER_ADMIN_TELEGRAM_ID);
       }
 
+      this.logger.log(`Notifying ${targetChatIds.size} admins about: ${actionName}`);
+
       for (const chatId of targetChatIds) {
         try {
-          await this.botService.sendAdminNotification(message, chatId);
+          if (receiptPhotoId) {
+            await this.botService.sendAdminPhotoNotification(receiptPhotoId, message, chatId, extra);
+          } else {
+            await this.botService.sendAdminNotification(message, chatId, extra);
+          }
         } catch (err: any) {
-          this.logger.error(`Failed to send scan notification to ${chatId}: ${err.message}`);
+          this.logger.error(`Failed to send ${actionName} notification to admin ${chatId}: ${err.message}`);
         }
       }
     } catch (e: any) {
-      this.logger.error(`Failed to retrieve admins for scan completed notification: ${e.message}`);
+      this.logger.error(`Failed to execute notifyAdmins for ${actionName}: ${e.message}`);
     }
   }
 }

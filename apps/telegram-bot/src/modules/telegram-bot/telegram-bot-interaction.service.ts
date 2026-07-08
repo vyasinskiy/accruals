@@ -113,6 +113,7 @@ export class TelegramBotInteractionService implements OnModuleInit {
           type: 'feed'
         }
       });
+      this.logger.log(`Feed channel registered: "${chatTitle}" (ID: ${chatId}) by admin ${ctx.from?.id}`);
       await ctx.reply(`✅ Этот чат ("${chatTitle}") успешно зарегистрирован как канал публикации (фид).`);
     } catch (e: any) {
       this.logger.error(`Failed to register feed channel ${chatId}: ${e.message}`);
@@ -131,6 +132,7 @@ export class TelegramBotInteractionService implements OnModuleInit {
         where: { chatId, type: 'feed' }
       });
       if (result.count > 0) {
+        this.logger.log(`Feed channel unregistered (ID: ${chatId}) by admin ${ctx.from?.id}`);
         await ctx.reply('✅ Этот чат удален из списка нав каналов публикации (фидов).');
       } else {
         await ctx.reply('⚠️ Этот чат не был зарегистрирован как фид.');
