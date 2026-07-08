@@ -113,7 +113,13 @@ export class TelegramBotInteractionService implements OnModuleInit {
           type: 'feed'
         }
       });
-      this.logger.log(`Feed channel registered: "${chatTitle}" (ID: ${chatId}) by admin ${ctx.from?.id}`);
+      this.logger.log(`Feed channel registered: "${chatTitle}" (ID: ${chatId})`);
+      
+      const adminMessage = `📢 <b>Канал публикаций зарегистрирован</b>\n\n` +
+        `🏢 Чат: "${chatTitle}"\n` +
+        `🆔 ID: <code>${chatId}</code>`;
+      await this.notifyAdmins(ctx, adminMessage);
+
       await ctx.reply(`✅ Этот чат ("${chatTitle}") успешно зарегистрирован как канал публикации (фид).`);
     } catch (e: any) {
       this.logger.error(`Failed to register feed channel ${chatId}: ${e.message}`);
@@ -132,7 +138,12 @@ export class TelegramBotInteractionService implements OnModuleInit {
         where: { chatId, type: 'feed' }
       });
       if (result.count > 0) {
-        this.logger.log(`Feed channel unregistered (ID: ${chatId}) by admin ${ctx.from?.id}`);
+        this.logger.log(`Feed channel unregistered (ID: ${chatId})`);
+        
+        const adminMessage = `📢 <b>Канал публикаций удален</b>\n\n` +
+          `🆔 ID: <code>${chatId}</code>`;
+        await this.notifyAdmins(ctx, adminMessage);
+
         await ctx.reply('✅ Этот чат удален из списка нав каналов публикации (фидов).');
       } else {
         await ctx.reply('⚠️ Этот чат не был зарегистрирован как фид.');
@@ -140,6 +151,29 @@ export class TelegramBotInteractionService implements OnModuleInit {
     } catch (e: any) {
       this.logger.error(`Failed to unregister feed channel ${chatId}: ${e.message}`);
       await ctx.reply('❌ Ошибка при удалении канала.');
+    }
+  }
+
+  private async notifyAdmins(ctx: MyContext, message: string) {
+    try {
+      const admins = await this.prisma.user.findMany({ where: { role: 'admin' } });
+      const targetChatIds = new Set<string>();
+      for (const admin of admins) {
+        targetChatIds.add(admin.telegramId.toString());
+      }
+      if (config.SUPER_ADMIN_TELEGRAM_ID) {
+        targetChatIds.add(config.SUPER_ADMIN_TELEGRAM_ID);
+      }
+
+      for (const chatId of targetChatIds) {
+        try {
+          await ctx.telegram.sendMessage(chatId, message, { parse_mode: 'HTML' });
+        } catch (err: any) {
+          this.logger.error(`Failed to notify admin ${chatId}: ${err.message}`);
+        }
+      }
+    } catch (e: any) {
+      this.logger.error(`Failed to notify admins: ${e.message}`);
     }
   }
 
