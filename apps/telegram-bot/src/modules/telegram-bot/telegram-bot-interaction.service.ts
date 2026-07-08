@@ -43,8 +43,13 @@ export class TelegramBotInteractionService implements OnModuleInit {
     this.bot = new Telegraf<MyContext>(config.TELEGRAM_BOT_TOKEN);
     this.bot.use(session());
     
-    // Admin Guard Middleware: ignore all users except Super Admin
+    // Admin Guard Middleware: ignore all users except Super Admin (allow channel posts)
     this.bot.use(async (ctx, next) => {
+      const isChannel = ctx.chat?.type === 'channel' || ctx.updateType === 'channel_post';
+      if (isChannel) {
+        return next();
+      }
+
       const isSuperAdmin = ctx.from?.id.toString() === config.SUPER_ADMIN_TELEGRAM_ID;
       if (!isSuperAdmin) {
         // Remain silent for non-admins
@@ -73,6 +78,18 @@ export class TelegramBotInteractionService implements OnModuleInit {
     this.bot.on('text', (ctx, next) => this.handleTextMessage(ctx, next));
     this.bot.on('photo', (ctx) => this.handlePhotoMessage(ctx));
     this.bot.action('skip_receipt_photo', (ctx) => this.handleSkipReceiptPhotoAction(ctx));
+
+    // Handle channel posts for commands manually
+    this.bot.on('channel_post', async (ctx, next) => {
+      const text = (ctx.channelPost as any)?.text || '';
+      if (text.startsWith('/register_feed')) {
+        return this.handleRegisterFeed(ctx);
+      }
+      if (text.startsWith('/unregister_feed')) {
+        return this.handleUnregisterFeed(ctx);
+      }
+      return next();
+    });
   }
 
   private async handleRegisterFeed(ctx: MyContext) {
