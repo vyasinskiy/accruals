@@ -105,3 +105,12 @@ sequenceDiagram
 3. **Deduplication & Logs (`publications` table)**:
    * To prevent duplicate spam in channels, the bot checks the `publications` table for any pre-existing combination of `[invoiceId, channelId]`.
    * Upon successful delivery, a log record is created in `publications` to track the delivery history.
+
+### Managing Feed Channels
+
+Administrator can dynamically register or unregister groups/channels as publication feeds directly from Telegram:
+
+* **Add a Feed**: Add the bot to the desired group/channel and send `/register_feed` in the group/channel chat. The bot will validate that this is not a private chat, and automatically register the chat in the `publication_channels` table with `type: "feed"`.
+* **Remove a Feed**: Send `/unregister_feed` inside the registered group/channel. The bot will remove it from the list of publication feeds.
+
+
