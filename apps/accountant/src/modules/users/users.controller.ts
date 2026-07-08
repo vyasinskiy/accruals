@@ -16,8 +16,8 @@ export class UsersController {
     return this.usersService.deleteUser(data.userId);
   }
 
-  @MessagePattern('delete_user_by_tg')
-  async deleteUserByTg(@Payload() data: { telegramId: string }) {
-    return this.usersService.deleteUserByTelegramId(data.telegramId);
+  @MessagePattern('delete_tenant_by_id')
+  async deleteTenantById(@Payload() data: { tenantId: number }) {
+    return this.usersService.deleteTenantById(data.tenantId);
   }
 }

@@ -65,6 +65,7 @@ export class TelegramBotController {
 
   @EventPattern('tenant_activated')
   async handleTenantActivated(@Payload() data: { 
+    tenantId?: number;
     chatId: string; 
     apartmentAddress?: string;
     rentPaymentDay?: number;
@@ -79,6 +80,24 @@ export class TelegramBotController {
       message += `💰 Сумма к оплате: ${data.rentAmount}\n`;
     }
     message += `\nТеперь вы можете добавлять оплаты и просматривать квитанции.`;
+
+    if (data.tenantId) {
+      try {
+        await this.prisma.user.upsert({
+          where: { telegramId: BigInt(data.chatId) },
+          create: {
+            telegramId: BigInt(data.chatId),
+            tenantId: data.tenantId,
+            role: 'tenant'
+          },
+          update: {
+            tenantId: data.tenantId
+          }
+        });
+      } catch (e: any) {
+        this.logger.error(`Failed to link tenantId ${data.tenantId} to user ${data.chatId}: ${e.message}`);
+      }
+    }
 
     await this.botService.sendNotification(message, data.chatId);
   }
@@ -102,30 +121,50 @@ export class TelegramBotController {
     periodLabel: string; 
     amountText: string; 
     statusText: string; 
-    apartmentId: number;
-    chatId?: string;
+    apartment?: { id: number; address?: string };
+    tenant?: { id: number; status: string };
   }) {
-    let targetChatId = data.chatId;
-    let apartmentAddress = 'неизвестен';
+    const targetChatIds = new Set<string>();
+    const apartmentAddress = data.apartment?.address || 'неизвестен';
 
-    try {
-      const apartment = await firstValueFrom(this.accountantClient.send('get_apartment', data.apartmentId));
-      if (apartment) {
-        apartmentAddress = apartment.address || apartment.externalId;
-        
-        if (!targetChatId) {
-          const user = await firstValueFrom(this.accountantClient.send('get_tenant_by_apartment', data.apartmentId));
-          if (user && user.telegramId) {
-            targetChatId = user.telegramId.toString();
-          }
+    // 1. Resolve personal chat if tenant is active
+    if (data.tenant && data.tenant.status === 'active') {
+      try {
+        const user = await this.prisma.user.findUnique({
+          where: { tenantId: data.tenant.id }
+        });
+        if (user) {
+          targetChatIds.add(user.telegramId.toString());
         }
+      } catch (e: any) {
+        this.logger.error(`Failed to lookup user by tenantId ${data.tenant.id}: ${e.message}`);
       }
-    } catch (e) {
-      const errorMessage = e instanceof Error ? e.message : String(e);
-      this.logger.error(`Failed to fetch info for accrual notification: ${errorMessage}`);
     }
 
-    if (!targetChatId) return;
+    // 2. Resolve feed channels
+    try {
+      let feedChannels = await this.prisma.publicationChannel.findMany({
+        where: { type: 'feed' }
+      });
+
+      // Fallback/sync with config.TELEGRAM_CHAT_ID
+      if (feedChannels.length === 0 && config.TELEGRAM_CHAT_ID) {
+        const defaultFeed = await this.prisma.publicationChannel.upsert({
+          where: { chatId: config.TELEGRAM_CHAT_ID },
+          create: { chatId: config.TELEGRAM_CHAT_ID, name: 'Default Feed', type: 'feed' },
+          update: { type: 'feed' }
+        });
+        feedChannels = [defaultFeed];
+      }
+
+      for (const channel of feedChannels) {
+        targetChatIds.add(channel.chatId);
+      }
+    } catch (e: any) {
+      this.logger.error(`Failed to resolve feed channels: ${e.message}`);
+    }
+
+    if (targetChatIds.size === 0) return;
 
     const message = `🔔 <b>Новое начисление!</b>\n\n` +
       `Период: ${data.periodLabel}\n` +
@@ -133,75 +172,106 @@ export class TelegramBotController {
       `Статус: ${data.statusText}\n` +
       `Адрес: ${apartmentAddress}`;
 
-    await this.botService.sendNotification(message, targetChatId);
+    for (const chatId of targetChatIds) {
+      try {
+        await this.botService.sendNotification(message, chatId);
+      } catch (err: any) {
+        this.logger.error(`Failed to send accrual notification to chat ${chatId}: ${err.message}`);
+      }
+    }
   }
 
   @EventPattern('invoice_available')
   async handleInvoiceAvailable(@Payload() data: { 
     id: number;
     periodLabel: string; 
-    apartmentId: number;
-    chatId?: string;
+    apartment?: { id: number; address?: string };
+    tenant?: { id: number; status: string };
   }) {
-    let targetChatId = data.chatId;
-    let apartmentAddress = 'неизвестен';
+    const targetChatIds = new Set<string>();
+    const apartmentAddress = data.apartment?.address || 'неизвестен';
 
-    try {
-      const apartment = await firstValueFrom(this.accountantClient.send('get_apartment', data.apartmentId));
-      if (apartment) {
-        apartmentAddress = apartment.address || apartment.externalId;
-        
-        if (!targetChatId) {
-          const user = await firstValueFrom(this.accountantClient.send('get_tenant_by_apartment', data.apartmentId));
-          if (user && user.telegramId) {
-            targetChatId = user.telegramId.toString();
-          }
+    // 1. Resolve personal chat if tenant is active
+    if (data.tenant && data.tenant.status === 'active') {
+      try {
+        const user = await this.prisma.user.findUnique({
+          where: { tenantId: data.tenant.id }
+        });
+        if (user) {
+          targetChatIds.add(user.telegramId.toString());
         }
+      } catch (e: any) {
+        this.logger.error(`Failed to lookup user by tenantId ${data.tenant.id}: ${e.message}`);
       }
-    } catch (e) {
-      const errorMessage = e instanceof Error ? e.message : String(e);
-      this.logger.error(`Failed to fetch info for invoice notification: ${errorMessage}`);
     }
 
-    if (!targetChatId) return;
-
+    // 2. Resolve feed channels
     try {
-      const existingPublication = await this.prisma.publication.findFirst({
-        where: {
-          invoiceId: data.id,
-          channel: {
-            chatId: targetChatId
-          }
-        }
+      let feedChannels = await this.prisma.publicationChannel.findMany({
+        where: { type: 'feed' }
       });
-      if (existingPublication) {
-        this.logger.log(`Invoice ${data.id} already sent to chat ${targetChatId}. Skipping notification.`);
-        return;
+
+      // Fallback/sync with config.TELEGRAM_CHAT_ID
+      if (feedChannels.length === 0 && config.TELEGRAM_CHAT_ID) {
+        const defaultFeed = await this.prisma.publicationChannel.upsert({
+          where: { chatId: config.TELEGRAM_CHAT_ID },
+          create: { chatId: config.TELEGRAM_CHAT_ID, name: 'Default Feed', type: 'feed' },
+          update: { type: 'feed' }
+        });
+        feedChannels = [defaultFeed];
+      }
+
+      for (const channel of feedChannels) {
+        targetChatIds.add(channel.chatId);
       }
     } catch (e: any) {
-      this.logger.error(`Failed to check invoice publication status: ${e.message}`);
+      this.logger.error(`Failed to resolve feed channels: ${e.message}`);
     }
+
+    if (targetChatIds.size === 0) return;
 
     const message = `📄 <b>Доступна новая квитанция!</b>\n\n` +
       `Период: ${data.periodLabel}\n` +
       `Адрес: ${apartmentAddress}`;
 
-    try {
-      await this.botService.sendNotification(message, targetChatId);
-      await this.prisma.publication.create({
-        data: {
-          invoiceId: data.id,
-          channel: {
-            connectOrCreate: {
-              where: { chatId: targetChatId },
-              create: { chatId: targetChatId }
+    for (const chatId of targetChatIds) {
+      try {
+        // Resolve or create channel in DB to link with Publication
+        const channel = await this.prisma.publicationChannel.upsert({
+          where: { chatId },
+          create: { 
+            chatId, 
+            type: chatId === config.TELEGRAM_CHAT_ID ? 'feed' : 'personal',
+            name: chatId === config.TELEGRAM_CHAT_ID ? 'Default Feed' : 'Personal Chat'
+          },
+          update: {}
+        });
+
+        const existingPublication = await this.prisma.publication.findUnique({
+          where: {
+            invoiceId_channelId: {
+              invoiceId: data.id,
+              channelId: channel.id
             }
           }
+        });
+
+        if (existingPublication) {
+          this.logger.log(`Invoice ${data.id} already sent to chat ${chatId}. Skipping.`);
+          continue;
         }
-      });
-      this.logger.log(`Notification for invoice ${data.id} sent to chat ${targetChatId} and logged.`);
-    } catch (err: any) {
-      this.logger.error(`Failed to send invoice notification to Telegram: ${err.message}`);
+
+        await this.botService.sendNotification(message, chatId);
+        await this.prisma.publication.create({
+          data: {
+            invoiceId: data.id,
+            channelId: channel.id
+          }
+        });
+        this.logger.log(`Notification for invoice ${data.id} sent to chat ${chatId} and logged.`);
+      } catch (err: any) {
+        this.logger.error(`Failed to process invoice notification/log for chat ${chatId}: ${err.message}`);
+      }
     }
   }
 

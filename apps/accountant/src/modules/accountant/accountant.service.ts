@@ -95,6 +95,16 @@ export class AccountantService {
     this.logger.debug(`Upserting accrual: account=${data.accountExternalId}, period=${data.periodId}`);
     const account = await this.prisma.account.findUnique({
       where: { externalId: data.accountExternalId },
+      include: {
+        apartment: {
+          include: {
+            tenants: {
+              where: { status: 'active' },
+              include: { user: true }
+            }
+          }
+        }
+      }
     });
 
     if (!account) {
@@ -140,11 +150,21 @@ export class AccountantService {
     });
 
     if (!existing) {
+      const activeTenant = account.apartment?.tenants?.[0];
+      const tenant = activeTenant ? {
+        id: activeTenant.id,
+        status: activeTenant.status
+      } : undefined;
+
       this.notificationsClient.emit('accrual_upserted', {
         periodLabel: data.periodLabel,
         amountText: data.amountText,
         statusText: data.statusText,
-        apartmentId: account.apartmentId
+        apartment: {
+          id: account.apartmentId,
+          address: account.apartment?.address || account.apartment?.externalId || 'неизвестен'
+        },
+        tenant
       });
     }
 
@@ -155,6 +175,16 @@ export class AccountantService {
     this.logger.debug(`Upserting invoice: account=${data.accountExternalId}, period=${data.periodId}`);
     const account = await this.prisma.account.findUnique({
       where: { externalId: data.accountExternalId },
+      include: {
+        apartment: {
+          include: {
+            tenants: {
+              where: { status: 'active' },
+              include: { user: true }
+            }
+          }
+        }
+      }
     });
 
     if (!account) {
@@ -210,10 +240,20 @@ export class AccountantService {
     });
 
     if (!existing) {
+      const activeTenant = account.apartment?.tenants?.[0];
+      const tenant = activeTenant ? {
+        id: activeTenant.id,
+        status: activeTenant.status
+      } : undefined;
+
       this.notificationsClient.emit('invoice_available', {
         id: result.id,
         periodLabel: data.periodLabel,
-        apartmentId: account.apartmentId
+        apartment: {
+          id: account.apartmentId,
+          address: account.apartment?.address || account.apartment?.externalId || 'неизвестен'
+        },
+        tenant
       });
     }
 
@@ -258,18 +298,18 @@ export class AccountantService {
     }
   }
 
-  async createPayment(data: { telegramId: number | string; userName: string; amount: number; receiptPhotoId: string | null }) {
-    const user = await this.prisma.user.findUnique({
-      where: { telegramId: BigInt(data.telegramId) }
+  async createPayment(data: { tenantId: number; userName: string; amount: number; receiptPhotoId: string | null }) {
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: data.tenantId }
     });
 
-    if (!user) {
-      throw new Error(`User with Telegram ID ${data.telegramId} not found in accounting system.`);
+    if (!tenant) {
+      throw new Error(`Tenant with ID ${data.tenantId} not found in accounting system.`);
     }
 
     const result = await this.prisma.payment.create({
       data: {
-        userId: user.id,
+        userId: tenant.userId,
         userName: data.userName,
         amount: data.amount,
         receiptPhotoId: data.receiptPhotoId,

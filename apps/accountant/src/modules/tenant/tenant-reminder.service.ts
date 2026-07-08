@@ -39,13 +39,13 @@ export class TenantReminderService {
       }
 
       for (const tenant of tenantsToRemind) {
-        if (tenant.user.telegramId && tenant.rentAmount) {
+        if (tenant.rentAmount) {
           this.notificationsClient.emit('remind_rent_payment', {
-            chatId: tenant.user.telegramId.toString(),
+            tenantId: tenant.id,
             rentAmount: tenant.rentAmount.toString(),
             apartmentAddress: tenant.apartment?.address || 'Неизвестно'
           });
-          this.logger.log(`Sent reminder event for tenant ${tenant.id} (Chat ID: ${tenant.user.telegramId.toString()})`);
+          this.logger.log(`Sent reminder event for tenant ${tenant.id}`);
         }
       }
     } catch (error) {

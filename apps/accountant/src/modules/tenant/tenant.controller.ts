@@ -26,8 +26,8 @@ export class TenantController {
   }
 
   @MessagePattern('get_tenant')
-  async getTenant(@Payload() data: { telegramId: string | number }) {
-    return this.tenantRegistrationService.getTenantByTelegramId(data.telegramId);
+  async getTenant(@Payload() data: { tenantId: number }) {
+    return this.tenantRegistrationService.getTenantById(data.tenantId);
   }
 
   @MessagePattern('get_pending_tenants')
@@ -46,12 +46,12 @@ export class TenantController {
   }
 
   @MessagePattern('get_tenant_invoices')
-  async getTenantInvoices(@Payload() data: { telegramId: string | number }) {
-    return this.tenantService.getInvoices(data.telegramId);
+  async getTenantInvoices(@Payload() data: { tenantId: number }) {
+    return this.tenantService.getInvoices(data.tenantId);
   }
 
   @MessagePattern('get_tenant_debt')
-  async getTenantDebt(@Payload() data: { telegramId: string | number }) {
-    return this.tenantService.getCurrentDebt(data.telegramId);
+  async getTenantDebt(@Payload() data: { tenantId: number }) {
+    return this.tenantService.getCurrentDebt(data.tenantId);
   }
 }

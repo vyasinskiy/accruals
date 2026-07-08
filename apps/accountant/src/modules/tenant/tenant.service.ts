@@ -18,24 +18,24 @@ export class TenantService {
     ));
   }
 
-  async addPayment(data: { telegramId: string | number; amount: number; receiptPhotoId?: string; isPaidToday: boolean }) {
-    const user = await this.prisma.user.findUnique({
-      where: { telegramId: BigInt(data.telegramId) },
-      include: { tenantProfile: { include: { apartment: true } } }
+  async addPayment(data: { tenantId: number; amount: number; receiptPhotoId?: string; isPaidToday: boolean }) {
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: data.tenantId },
+      include: { user: true, apartment: true }
     });
 
-    if (!user || !user.tenantProfile) {
+    if (!tenant) {
       throw new NotFoundException('Tenant not found');
     }
 
-    if (user.tenantProfile.status !== 'active') {
+    if (tenant.status !== 'active') {
       throw new Error('Tenant is not active');
     }
 
     const payment = await this.prisma.payment.create({
       data: {
-        userId: user.id,
-        userName: user.name || 'Unknown',
+        userId: tenant.userId,
+        userName: tenant.user.name || 'Unknown',
         amount: data.amount,
         receiptPhotoId: data.receiptPhotoId,
         status: 'unconfirmed',
@@ -45,8 +45,8 @@ export class TenantService {
     // Notify about new payment
     this.notificationsClient.emit('payment_created', {
       paymentId: payment.id,
-      userName: user.name,
-      apartmentAddress: user.tenantProfile.apartment?.address || 'Не указан',
+      userName: tenant.user.name,
+      apartmentAddress: tenant.apartment?.address || 'Не указан',
       amount: data.amount,
       receiptPhotoId: data.receiptPhotoId
     });
@@ -54,21 +54,21 @@ export class TenantService {
     return this.serialize(payment);
   }
 
-  async getInvoices(telegramId: string | number) {
-    const user = await this.prisma.user.findUnique({
-      where: { telegramId: BigInt(telegramId) },
-      include: { tenantProfile: { include: { apartment: { include: { accounts: true } } } } }
+  async getInvoices(tenantId: number) {
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: tenantId },
+      include: { apartment: { include: { accounts: true } } }
     });
 
-    if (!user || !user.tenantProfile) {
+    if (!tenant) {
       throw new NotFoundException('Tenant not found');
     }
 
-    if (!user.tenantProfile.apartment) {
+    if (!tenant.apartment) {
       return this.serialize([]);
     }
 
-    const accountIds = user.tenantProfile.apartment.accounts.map((acc: any) => acc.id);
+    const accountIds = tenant.apartment.accounts.map((acc: any) => acc.id);
     const invoices = await this.prisma.invoice.findMany({
       where: { accountId: { in: accountIds }, available: true },
       orderBy: { periodLabel: 'desc' },
@@ -78,21 +78,21 @@ export class TenantService {
     return this.serialize(invoices);
   }
 
-  async getCurrentDebt(telegramId: string | number) {
-    const user = await this.prisma.user.findUnique({
-      where: { telegramId: BigInt(telegramId) },
-      include: { tenantProfile: { include: { apartment: { include: { accounts: true } } } } }
+  async getCurrentDebt(tenantId: number) {
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: tenantId },
+      include: { user: true, apartment: { include: { accounts: true } } }
     });
 
-    if (!user || !user.tenantProfile) {
+    if (!tenant) {
       throw new NotFoundException('Tenant not found');
     }
 
-    if (!user.tenantProfile.apartment) {
-      return this.serialize({ tenant: user, debts: [] });
+    if (!tenant.apartment) {
+      return this.serialize({ tenant: tenant.user, debts: [] });
     }
 
-    const accountIds = user.tenantProfile.apartment.accounts.map((acc: any) => acc.id);
+    const accountIds = tenant.apartment.accounts.map((acc: any) => acc.id);
     const debts = [];
 
     for (const accountId of accountIds) {
@@ -105,6 +105,6 @@ export class TenantService {
       }
     }
 
-    return this.serialize({ tenant: user, debts });
+    return this.serialize({ tenant: tenant.user, debts });
   }
 }

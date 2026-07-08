@@ -9,29 +9,18 @@ export class UsersService implements OnModuleInit {
   constructor(private readonly prisma: PrismaService) {}
 
   async onModuleInit() {
-    if (config.SUPER_ADMIN_TELEGRAM_ID) {
-      const tgId = BigInt(config.SUPER_ADMIN_TELEGRAM_ID);
+    const admin = await this.prisma.user.findFirst({
+      where: { role: 'admin' }
+    });
 
-      const user = await this.prisma.user.findUnique({
-        where: { telegramId: tgId }
+    if (!admin) {
+      await this.prisma.user.create({
+        data: {
+          name: 'Super Admin',
+          role: 'admin'
+        },
       });
-
-      if (!user) {
-        await this.prisma.user.create({
-          data: {
-            name: 'Super Admin',
-            role: 'admin',
-            telegramId: tgId
-          },
-        });
-        this.logger.log(`Super Admin user created with Telegram ID: ${tgId}`);
-      } else if (user.role !== 'admin') {
-        await this.prisma.user.update({
-          where: { id: user.id },
-          data: { role: 'admin' },
-        });
-        this.logger.log(`Updated user ${tgId} role to admin`);
-      }
+      this.logger.log('Super Admin user created in DB');
     }
   }
 
@@ -63,8 +52,8 @@ export class UsersService implements OnModuleInit {
       where: { id: userId }
     });
 
-    if (user?.telegramId && user.telegramId.toString() === config.SUPER_ADMIN_TELEGRAM_ID) {
-      throw new Error('Cannot delete Super Admin user');
+    if (user?.role === 'admin') {
+      throw new Error('Cannot delete Admin user');
     }
 
     const deletedUser = await this.prisma.user.delete({
@@ -73,28 +62,16 @@ export class UsersService implements OnModuleInit {
     return this.serialize(deletedUser);
   }
 
-  async deleteUserByTelegramId(telegramId: string) {
-    if (telegramId === config.SUPER_ADMIN_TELEGRAM_ID) {
-      throw new Error('Cannot delete Super Admin user');
-    }
-
-    const user = await this.prisma.user.findUnique({
-      where: { telegramId: BigInt(telegramId) }
+  async deleteTenantById(tenantId: number) {
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: tenantId }
     });
 
-    if (!user) return null;
+    if (!tenant) return null;
 
     const deletedUser = await this.prisma.user.delete({
-      where: { id: user.id }
+      where: { id: tenant.userId }
     });
     return this.serialize(deletedUser);
-  }
-
-  async findByTelegramId(telegramId: string | number | bigint) {
-    const user = await this.prisma.user.findUnique({
-      where: { telegramId: BigInt(telegramId) },
-      include: { tenantProfile: true }
-    });
-    return user ? this.serialize(user) : null;
   }
 }

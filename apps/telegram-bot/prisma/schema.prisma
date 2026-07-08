@@ -11,6 +11,7 @@ datasource db {
 model User {
   id              Int       @id @default(autoincrement())
   telegramId      BigInt    @unique @map("telegram_id")
+  tenantId        Int?      @unique @map("tenant_id")
   username        String?
   firstName       String?   @map("first_name")
   lastName        String?   @map("last_name")
@@ -24,6 +25,7 @@ model PublicationChannel {
   id        Int           @id @default(autoincrement())
   chatId    String        @unique @map("chat_id")
   name      String?
+  type      String        @default("personal")
   createdAt DateTime      @default(now()) @map("created_at")
 
   publications Publication[]

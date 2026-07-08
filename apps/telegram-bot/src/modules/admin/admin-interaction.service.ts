@@ -658,11 +658,13 @@ export class AdminInteractionService {
       try {
         const userToDelete = await this.prisma.user.findUnique({ where: { id: userId } });
         if (userToDelete) {
-          // 1. Delete from Accountant if exists (by telegramId)
+          // 1. Delete from Accountant if exists (by tenantId)
           try {
-            await firstValueFrom(this.accountantClient.send('delete_user_by_tg', { telegramId: userToDelete.telegramId.toString() }));
+            if (userToDelete.tenantId) {
+              await firstValueFrom(this.accountantClient.send('delete_tenant_by_id', { tenantId: userToDelete.tenantId }));
+            }
           } catch (e) {
-            this.logger.warn(`Failed to delete user ${userToDelete.telegramId} from Accountant (might not exist)`);
+            this.logger.warn(`Failed to delete tenant ${userToDelete.tenantId} from Accountant (might not exist)`);
           }
 
           // 2. Delete from local Bot DB

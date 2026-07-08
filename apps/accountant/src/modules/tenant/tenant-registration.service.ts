@@ -18,22 +18,13 @@ export class TenantRegistrationService {
     ));
   }
 
-  async registerTenant(data: { name: string; telegramId: string | number; platform?: string; apartmentId?: number; rentPaymentDay?: number; phone?: string }) {
-    const tgId = BigInt(data.telegramId);
-
-    let user = await this.prisma.user.findUnique({
-      where: { telegramId: tgId }
+  async registerTenant(data: { name: string; apartmentId?: number; rentPaymentDay?: number; phone?: string }) {
+    const user = await this.prisma.user.create({
+      data: {
+        name: data.name,
+        role: 'tenant'
+      }
     });
-
-    if (!user) {
-      user = await this.prisma.user.create({
-        data: {
-          name: data.name,
-          role: 'tenant',
-          telegramId: tgId
-        }
-      });
-    }
 
     const existingProfile = await this.prisma.tenant.findUnique({
       where: { userId: user.id }
@@ -71,11 +62,9 @@ export class TenantRegistrationService {
     });
     
     // Optionally notify the tenant that they are approved
-    if (tenant.user.telegramId) {
-      this.notificationsClient.emit('tenant_activated', {
-          chatId: tenant.user.telegramId.toString()
-      });
-    }
+    this.notificationsClient.emit('tenant_activated', {
+        tenantId
+    });
 
     return this.serialize(tenant);
   }
@@ -109,23 +98,21 @@ export class TenantRegistrationService {
     });
 
     // Notify the tenant that they are approved
-    if (tenant.user.telegramId) {
-      this.notificationsClient.emit('tenant_activated', {
-          chatId: tenant.user.telegramId.toString(),
-          apartmentAddress: tenant.apartment?.address || 'Неизвестно',
-          rentPaymentDay,
-          rentAmount: rentAmount ? rentAmount.toString() : undefined
-      });
-    }
+    this.notificationsClient.emit('tenant_activated', {
+        tenantId,
+        apartmentAddress: tenant.apartment?.address || 'Неизвестно',
+        rentPaymentDay,
+        rentAmount: rentAmount ? rentAmount.toString() : undefined
+    });
 
     return this.serialize(tenant);
   }
 
-  async getTenantByTelegramId(telegramId: string | number) {
-    const user = await this.prisma.user.findUnique({
-      where: { telegramId: BigInt(telegramId) },
-      include: { tenantProfile: { include: { apartment: { include: { accounts: true } } } } }
+  async getTenantById(tenantId: number) {
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: tenantId },
+      include: { user: true, apartment: { include: { accounts: true } } }
     });
-    return user ? this.serialize(user) : null;
+    return tenant ? this.serialize({ ...tenant.user, tenantProfile: tenant }) : null;
   }
 }

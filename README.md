@@ -61,3 +61,47 @@ The system consists of three main services communicating via RabbitMQ:
 4.  Start the infrastructure: `docker-compose -f infra/docker-compose.yml up -d`
 5.  Run database migrations: `cd apps/accountant && npx prisma migrate dev`
 6.  Start services in development mode: `npm run start:dev` (from respective app directories)
+
+## Notification Routing & Publication Flow
+
+The system implements a strictly decoupled notification architecture. The core **Accountant Service** handles business logic and has no knowledge of Telegram-specific fields, chat IDs, or HTML formatting rules. Routing and formatting are managed entirely on the **Telegram Bot Service** side.
+
+### Flow Architecture
+
+```mermaid
+sequenceDiagram
+    participant Accountant as Accountant Service
+    participant Queue as RabbitMQ Event Bus
+    participant Bot as Telegram Bot Service
+    database BotDB as Bot Database
+    participant Telegram as Telegram API
+
+    Accountant->>Queue: emit 'accrual_upserted' / 'invoice_available' (tenant, apartment)
+    Queue->>Bot: Consume event
+    rect rgb(30, 41, 59)
+        Note over Bot, BotDB: Resolve target channels
+        Bot->>BotDB: Query User where tenantId = tenant.id
+        BotDB-->>Bot: Return telegramId (Personal Chat)
+        Bot->>BotDB: Query channels where type = 'feed'
+        BotDB-->>Bot: Return feed channels (or fallback config)
+    end
+    loop for each targetChatId
+        Bot->>BotDB: Check if invoice already published to channel
+        alt Not published yet
+            Bot->>Telegram: Send message (HTML notification)
+            Bot->>BotDB: Log record in 'publications' table
+        else Already published
+            Bot->>Bot: Skip to prevent duplicate spam
+        end
+    end
+```
+
+### Key Components
+
+1. **Decoupled Events**: Core services emit payload events containing only logical identifiers (e.g., `tenant: { id, status }`, `apartment: { id, address }`). No platform-specific values like `chatId` or raw Telegram markup are passed.
+2. **Channel Resolution**:
+   * **Personal Chat**: The bot looks up the tenant's `telegramId` using the local relation mapping (`tenantId` -> `telegramId`) in the bot's database.
+   * **General Feeds**: The bot queries all registered publication channels with `type = "feed"` in the `publication_channels` table (with automatic fallback to the `TELEGRAM_CHAT_ID` environment variable).
+3. **Deduplication & Logs (`publications` table)**:
+   * To prevent duplicate spam in channels, the bot checks the `publications` table for any pre-existing combination of `[invoiceId, channelId]`.
+   * Upon successful delivery, a log record is created in `publications` to track the delivery history.

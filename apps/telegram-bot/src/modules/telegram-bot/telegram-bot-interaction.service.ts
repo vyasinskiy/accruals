@@ -120,14 +120,16 @@ export class TelegramBotInteractionService implements OnModuleInit {
           return ctx.answerCbQuery('В этой квартире нет активного арендатора.', { show_alert: true });
         }
         
-        const tgIdentity = tenant.identities?.find((i: any) => i.platform === 'telegram');
-        if (!tgIdentity) {
+        const botUser = await this.prisma.user.findUnique({
+          where: { tenantId: tenant.id }
+        });
+        if (!botUser) {
            return ctx.answerCbQuery('У арендатора нет Telegram.', { show_alert: true });
         }
 
         ctx.session = ctx.session || {};
         ctx.session.state = 'awaiting_amount';
-        ctx.session.paymentTargetTelegramId = tgIdentity.externalId;
+        ctx.session.paymentTargetTelegramId = botUser.telegramId.toString();
         
         await ctx.answerCbQuery();
         await ctx.editMessageText(`Выбрана квартира. Арендатор: ${tenant.name || 'Неизвестно'}\nВведите сумму оплаты (только число):`, Markup.inlineKeyboard([]));
@@ -344,8 +346,15 @@ export class TelegramBotInteractionService implements OnModuleInit {
 
         // Save to DB via accountant
         try {
+          const user = await this.prisma.user.findUnique({
+            where: { telegramId: BigInt(targetTelegramId) }
+          });
+          if (!user || !user.tenantId) {
+            throw new Error('Tenant not found in bot database');
+          }
+
           await firstValueFrom(this.accountantClient.send('create_payment', {
-            telegramId: targetTelegramId,
+            tenantId: user.tenantId,
             userName: ctx.from.username || ctx.from.first_name,
             amount,
             receiptPhotoId: photo.file_id
@@ -372,8 +381,15 @@ export class TelegramBotInteractionService implements OnModuleInit {
         this.logger.log(`Admin ${ctx.from.id} submitted payment without photo for amount ${amount} (Target: ${targetTelegramId})`);
 
         try {
+          const user = await this.prisma.user.findUnique({
+            where: { telegramId: BigInt(targetTelegramId) }
+          });
+          if (!user || !user.tenantId) {
+            throw new Error('Tenant not found in bot database');
+          }
+
           await firstValueFrom(this.accountantClient.send('create_payment', {
-            telegramId: targetTelegramId,
+            tenantId: user.tenantId,
             userName: ctx.from.username || ctx.from.first_name,
             amount,
             receiptPhotoId: null
