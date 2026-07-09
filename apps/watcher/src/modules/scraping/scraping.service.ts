@@ -163,6 +163,18 @@ export class ScrapingService implements OnApplicationBootstrap {
       accruals = dedupe(accruals, (item) => `${item.accountExternalId}_${item.periodId}`);
       invoices = dedupe(invoices, (item) => `${item.accountExternalId}_${item.periodId}`);
 
+      // Count new entities BEFORE we start upserting them.
+      // This is crucial because upserting is done asynchronously or fast enough
+      // to cause a race condition, where the DB would already contain the new items
+      // by the time we query it for calculation.
+      const { newApartments, newAccruals, newInvoices } = await this.calculateNewEntitiesCount(
+        apartments,
+        accounts,
+        accruals,
+        invoices,
+        log
+      );
+
       // 1. Process Apartments (Wait for completion)
       for (const apartment of apartments) {
         await lastValueFrom(this.accountantClient.send('upsert_apartment', apartment));
@@ -270,45 +282,6 @@ export class ScrapingService implements OnApplicationBootstrap {
       }
       log(`${blue}-----------------------------${reset}`);
 
-      let newApartments = 0;
-      let newAccruals = 0;
-      let newInvoices = 0;
-
-      try {
-        const existingApartments = await this.accountantClientService.findApartments({});
-        const apartmentMap = new Set((existingApartments || []).map((apt: any) => apt.externalId));
-        for (const apartment of apartments) {
-          if (!apartmentMap.has(apartment.externalId)) {
-            newApartments++;
-          }
-        }
-
-        const accountIds = accounts.map(a => a.externalId);
-        if (accountIds.length > 0) {
-          const existingAccruals = await this.accountantClientService.findAccruals({
-            accountExternalId: accountIds
-          });
-          const accrualMap = new Set((existingAccruals || []).map((acc: any) => `${acc.accountExternalId}_${acc.periodId}`));
-          for (const accrual of accruals) {
-            if (!accrualMap.has(`${accrual.accountExternalId}_${accrual.periodId}`)) {
-              newAccruals++;
-            }
-          }
-
-          const existingInvoices = await this.accountantClientService.findInvoices({
-            accountExternalId: accountIds
-          });
-          const invoiceMap = new Set((existingInvoices || []).map((inv: any) => `${inv.accountExternalId}_${inv.periodId}`));
-          for (const invoice of invoices) {
-            if (!invoiceMap.has(`${invoice.accountExternalId}_${invoice.periodId}`)) {
-              newInvoices++;
-            }
-          }
-        }
-      } catch (err: any) {
-        log(`Failed to calculate new items counts: ${err.message}`);
-      }
-
       const summary = await this.finalize(runId, {
         startedAt: startedAt.toISOString(),
         finishedAt: new Date().toISOString(),
@@ -384,6 +357,60 @@ export class ScrapingService implements OnApplicationBootstrap {
     this.notificationsClient.emit('scan_completed', summary);
 
     return summary;
+  }
+
+  /**
+   * Calculates the number of new apartments, accruals, and invoices by comparing the scraped snapshots
+   * against the database state BEFORE any upserts occur.
+   * This prevents race conditions where asynchronous DB updates make new items appear already processed.
+   */
+  private async calculateNewEntitiesCount(
+    apartments: ApartmentSnapshot[],
+    accounts: AccountSnapshot[],
+    accruals: AccrualSnapshot[],
+    invoices: InvoiceSnapshot[],
+    log: (message: string) => void
+  ): Promise<{ newApartments: number; newAccruals: number; newInvoices: number }> {
+    let newApartments = 0;
+    let newAccruals = 0;
+    let newInvoices = 0;
+
+    try {
+      const existingApartments = await this.accountantClientService.findApartments({});
+      const apartmentMap = new Set((existingApartments || []).map((apt: any) => apt.externalId));
+      for (const apartment of apartments) {
+        if (!apartmentMap.has(apartment.externalId)) {
+          newApartments++;
+        }
+      }
+
+      const accountIds = accounts.map(a => a.externalId);
+      if (accountIds.length > 0) {
+        const existingAccruals = await this.accountantClientService.findAccruals({
+          accountExternalId: accountIds
+        });
+        const accrualMap = new Set((existingAccruals || []).map((acc: any) => `${acc.accountExternalId}_${acc.periodId}`));
+        for (const accrual of accruals) {
+          if (!accrualMap.has(`${accrual.accountExternalId}_${accrual.periodId}`)) {
+            newAccruals++;
+          }
+        }
+
+        const existingInvoices = await this.accountantClientService.findInvoices({
+          accountExternalId: accountIds
+        });
+        const invoiceMap = new Set((existingInvoices || []).map((inv: any) => `${inv.accountExternalId}_${inv.periodId}`));
+        for (const invoice of invoices) {
+          if (!invoiceMap.has(`${invoice.accountExternalId}_${invoice.periodId}`)) {
+            newInvoices++;
+          }
+        }
+      }
+    } catch (err: any) {
+      log(`Failed to calculate new items counts: ${err.message}`);
+    }
+
+    return { newApartments, newAccruals, newInvoices };
   }
 }
 
