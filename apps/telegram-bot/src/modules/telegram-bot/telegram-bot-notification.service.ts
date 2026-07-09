@@ -33,4 +33,11 @@ export class TelegramBotNotificationService implements OnModuleInit {
       ...extra,
     });
   }
+
+  async sendInvoiceDocument(chatId: string, url: string, filename: string, caption?: string) {
+    await this.bot.telegram.sendDocument(chatId, { url, filename }, {
+      caption,
+      parse_mode: 'HTML',
+    });
+  }
 }

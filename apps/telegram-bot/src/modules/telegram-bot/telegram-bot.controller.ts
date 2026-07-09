@@ -230,6 +230,19 @@ export class TelegramBotController {
 
     if (targetChatIds.size === 0) return;
 
+    // Fetch invoice details from Accountant service to check if downloadUrl is available
+    let downloadUrl: string | null = null;
+    try {
+      const invoiceData = await firstValueFrom(
+        this.accountantClient.send<any>('get_invoice', data.id)
+      );
+      if (invoiceData && invoiceData.downloadUrl) {
+        downloadUrl = invoiceData.downloadUrl;
+      }
+    } catch (e: any) {
+      this.logger.error(`Failed to fetch details for invoice ${data.id}: ${e.message}`);
+    }
+
     const message = `📄 <b>Доступна новая квитанция!</b>\n\n` +
       `Период: ${data.periodLabel}\n` +
       `Адрес: ${apartmentAddress}`;
@@ -262,7 +275,13 @@ export class TelegramBotController {
         }
 
         this.logger.log(`Sending invoice available notification (invoiceId: ${data.id}, period: ${data.periodLabel}) to chat ${chatId}`);
-        await this.botService.sendNotification(message, chatId);
+        if (downloadUrl) {
+          const filename = `Квитанция_${data.periodLabel}.pdf`;
+          await this.botService.sendInvoiceDocument(chatId, downloadUrl, filename, message);
+        } else {
+          await this.botService.sendNotification(message, chatId);
+        }
+
         await this.prisma.publication.create({
           data: {
             invoiceId: data.id,
