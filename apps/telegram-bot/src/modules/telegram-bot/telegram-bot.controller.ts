@@ -243,7 +243,9 @@ export class TelegramBotController {
       this.logger.error(`Failed to fetch details for invoice ${data.id}: ${e.message}`);
     }
 
-    const message = `📄 <b>Доступна новая квитанция!</b>\n\n` +
+    const dateStr = new Date().toLocaleDateString('ru-RU', { timeZone: config.TZ });
+    const message = `📅 ${dateStr}\n` +
+      `📄 <b>Доступна новая квитанция!</b>\n\n` +
       `Период: ${data.periodLabel}\n` +
       `Адрес: ${apartmentAddress}`;
 

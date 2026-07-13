@@ -14,6 +14,10 @@ export class S3StorageService {
     );
   }
 
+  isUploaded(uploadedToS3: boolean): boolean {
+    return !this.isEnabled() || uploadedToS3;
+  }
+
   buildInvoiceKey(accountId: string, periodId: string): string {
     const filename = `${slug(accountId)}-${slug(periodId)}.pdf`;
     const prefix = config.S3_PREFIX.trim().replace(/^\/+|\/+$/g, '');

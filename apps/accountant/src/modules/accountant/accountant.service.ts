@@ -239,7 +239,10 @@ export class AccountantService {
       },
     });
 
-    if (!existing) {
+    const wasReady = existing ? (existing.available && this.s3Storage.isUploaded(existing.uploadedToS3)) : false;
+    const nowReady = result.available && this.s3Storage.isUploaded(result.uploadedToS3);
+
+    if (!wasReady && nowReady) {
       const activeTenant = account.apartment?.tenants?.[0];
       const tenant = activeTenant ? {
         id: activeTenant.id,

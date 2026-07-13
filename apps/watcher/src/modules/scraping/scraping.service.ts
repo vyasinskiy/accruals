@@ -253,6 +253,8 @@ export class ScrapingService implements OnApplicationBootstrap {
             const errorMsg = `Invoice ${invoice.periodLabel} (${invoice.accountExternalId}): ${err.message.trim()}`;
             log(`${red}Failed to process S3 upload for ${errorMsg}${reset}`);
             uploadErrors.push(errorMsg);
+            invoice.available = false;
+            invoice.uploadedToS3 = false;
           }
         }
 
