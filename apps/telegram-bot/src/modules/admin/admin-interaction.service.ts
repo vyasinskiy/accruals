@@ -185,6 +185,110 @@ export class AdminInteractionService {
     }
   }
 
+  async showLatestAccruals(ctx: Context, page = 1) {
+    const take = 5;
+    const skip = (page - 1) * take;
+
+    try {
+      const response = await firstValueFrom(
+        this.accountantClient.send<{ items: any[]; total: number }>('get_accruals_paginated', { skip, take })
+      );
+
+      const items = response?.items || [];
+      const total = response?.total || 0;
+      const totalPages = Math.ceil(total / take) || 1;
+
+      if (items.length === 0) {
+        const fallbackMsg = `📄 <b>Последние начисления (Страница ${page} из ${totalPages})</b>\n\nНет данных о начислениях.`;
+        const fallbackButtons = [];
+        if (page > 1) {
+          fallbackButtons.push(Markup.button.callback('⬅️ Назад', `admin_latest_accruals_${page - 1}`));
+        }
+        const method = ctx.callbackQuery ? 'editMessageText' : 'reply';
+        await (ctx as any)[method](fallbackMsg, {
+          parse_mode: 'HTML',
+          ...Markup.inlineKeyboard([fallbackButtons])
+        });
+        return;
+      }
+
+      let message = `📄 <b>Последние начисления (Страница ${page} из ${totalPages})</b>\n\n`;
+
+      const invoiceButtons: any[] = [];
+
+      items.forEach((item, index) => {
+        const itemNumber = skip + index + 1;
+        const address = item.account?.apartment?.address || item.account?.apartment?.externalId || 'Неизвестен';
+        
+        // Display account label if available
+        const accLabel = item.account?.customLabel || [item.account?.accountNumber, item.account?.accountLabel].filter(Boolean).join(' ') || item.account?.externalId || '';
+        const accInfo = accLabel ? ` (${accLabel})` : '';
+
+        let amount = item.amountText || 'Не указана';
+        let status = item.statusText || 'Неизвестен';
+        try {
+          const raw = JSON.parse(item.rawJson || '{}');
+          const acc = raw.accrual || {};
+          const btn = acc.button || {};
+
+          const val = (acc.accruedAmount !== undefined && Number(acc.accruedAmount) !== 0) ? Number(acc.accruedAmount) :
+                      (acc.amountToPay !== undefined && Number(acc.amountToPay) !== 0) ? Number(acc.amountToPay) :
+                      (acc.paidAmount !== undefined ? Number(acc.paidAmount) : 0);
+          amount = `${val.toFixed(2)} руб.`;
+
+          if (btn.pay === true && Number(btn.toPay) > 0) {
+            status = 'Ожидает оплаты';
+          } else if (acc.amountToPay === 0 || Number(btn.toPay) === 0) {
+            status = 'Оплачено';
+          } else if (btn.message) {
+            status = btn.message;
+          }
+        } catch (e) {
+          // fallback
+        }
+
+        const dateStr = item.firstSeenAt ? new Date(item.firstSeenAt).toLocaleString('ru-RU', { timeZone: config.TZ }) : 'Неизвестно';
+
+        message += `${itemNumber}. 🏠 <b>${address}</b>${accInfo}\n` +
+          `   Период: <code>${item.periodLabel}</code>\n` +
+          `   Сумма: <code>${amount}</code> | Статус: <code>${status}</code>\n` +
+          `   Появился: <code>${dateStr}</code>\n\n`;
+
+        if (item.invoiceAvailable && item.invoiceId) {
+          invoiceButtons.push([
+            Markup.button.callback(`📄 Скачать инвойс #${itemNumber}`, `admin_get_invoice_${item.invoiceId}`)
+          ]);
+        }
+      });
+
+      const keyboardRows: any[][] = [...invoiceButtons];
+      const navigationRow: any[] = [];
+
+      if (page > 1) {
+        navigationRow.push(Markup.button.callback('⬅️ Назад', `admin_latest_accruals_${page - 1}`));
+      }
+      if (page * take < total) {
+        navigationRow.push(Markup.button.callback('➡️ Вперед', `admin_latest_accruals_${page + 1}`));
+      }
+
+      if (navigationRow.length > 0) {
+        keyboardRows.push(navigationRow);
+      }
+
+      const method = ctx.callbackQuery ? 'editMessageText' : 'reply';
+      await (ctx as any)[method](message, {
+        parse_mode: 'HTML',
+        ...Markup.inlineKeyboard(keyboardRows)
+      });
+    } catch (e: any) {
+      if (e.description?.includes('message is not modified')) {
+        return; // Ignore if message didn't change
+      }
+      this.logger.error('Failed to show latest accruals', e);
+      await ctx.reply('Ошибка загрузки последних начислений.');
+    }
+  }
+
   async listApartments(ctx: Context) {
     try {
       const apartments = await firstValueFrom(this.accountantClient.send<Apartment[]>('get_apartments', {}));
@@ -205,6 +309,20 @@ export class AdminInteractionService {
   }
 
   registerHandlers(bot: Telegraf<any>) {
+    bot.hears('Последние инвойсы', async (ctx) => {
+      await this.showLatestAccruals(ctx, 1);
+    });
+
+    bot.command('latest_invoices', async (ctx) => {
+      await this.showLatestAccruals(ctx, 1);
+    });
+
+    bot.action(/admin_latest_accruals_(\d+)/, async (ctx) => {
+      const page = parseInt(ctx.match[1], 10);
+      await this.showLatestAccruals(ctx, page);
+      await ctx.answerCbQuery();
+    });
+
     // Admin Menu - Show Apartments
     bot.hears('Админ Меню', async (ctx) => {
       await this.listApartments(ctx);

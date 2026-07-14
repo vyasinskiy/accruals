@@ -438,6 +438,64 @@ export class AccountantService {
     return this.serialize(results);
   }
 
+  async findAccrualsPaginated(query: { skip?: number; take?: number }) {
+    const skip = Number(query.skip) || 0;
+    const take = Number(query.take) || 5;
+
+    const total = await this.prisma.accrual.count();
+
+    const accruals = await this.prisma.accrual.findMany({
+      orderBy: [{ periodId: 'desc' }, { firstSeenAt: 'desc' }],
+      skip,
+      take,
+      include: {
+        account: {
+          include: {
+            apartment: true
+          }
+        }
+      }
+    });
+
+    let items: any[] = [];
+    if (accruals.length > 0) {
+      const invoices = await this.prisma.invoice.findMany({
+        where: {
+          OR: accruals.map(a => ({
+            accountExternalId: a.accountExternalId,
+            periodId: a.periodId
+          }))
+        }
+      });
+
+      const invoiceMap = new Map<string, typeof invoices[0]>();
+      for (const inv of invoices) {
+        invoiceMap.set(`${inv.accountExternalId}_${inv.periodId}`, inv);
+      }
+
+      items = accruals.map(a => {
+        const matchingInv = invoiceMap.get(`${a.accountExternalId}_${a.periodId}`);
+        return {
+          id: a.id,
+          accountId: a.accountId,
+          accountExternalId: a.accountExternalId,
+          periodId: a.periodId,
+          periodLabel: a.periodLabel,
+          amountText: a.amountText,
+          statusText: a.statusText,
+          firstSeenAt: a.firstSeenAt,
+          lastSeenAt: a.lastSeenAt,
+          account: a.account,
+          rawJson: a.rawJson,
+          invoiceId: matchingInv?.id,
+          invoiceAvailable: matchingInv ? (matchingInv.available && matchingInv.uploadedToS3) : false
+        };
+      });
+    }
+
+    return this.serialize({ items, total });
+  }
+
   async findInvoices(filters: { 
     accountId?: number; 
     accountExternalId?: string | string[]; 

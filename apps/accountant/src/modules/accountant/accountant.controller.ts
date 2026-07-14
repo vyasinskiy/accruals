@@ -71,6 +71,11 @@ export class AccountantController {
     return this.accountantService.findAccruals(query);
   }
 
+  @MessagePattern('get_accruals_paginated')
+  async getAccrualsPaginated(@Payload() query: any = {}) {
+    return this.accountantService.findAccrualsPaginated(query);
+  }
+
   @Get('invoices')
   async findInvoices(@Query() query: any) {
     return this.accountantService.findInvoices(query);

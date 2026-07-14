@@ -37,12 +37,12 @@ export class TelegramBotInteractionService implements OnModuleInit {
     @Inject('ACCOUNTANT_SERVICE') private readonly accountantClient: ClientProxy,
     private readonly adminInteractionService: AdminInteractionService,
     private readonly prisma: PrismaService
-  ) {}
+  ) { }
 
   onModuleInit() {
     this.bot = new Telegraf<MyContext>(config.TELEGRAM_BOT_TOKEN);
     this.bot.use(session());
-    
+
     // Admin Guard Middleware: ignore all users except Super Admin (allow channel posts)
     this.bot.use(async (ctx, next) => {
       const isChannel = ctx.chat?.type === 'channel' || ctx.updateType === 'channel_post';
@@ -60,7 +60,7 @@ export class TelegramBotInteractionService implements OnModuleInit {
 
     this.setupHandlers();
     this.adminInteractionService.registerHandlers(this.bot);
-    
+
     this.bot.launch().then(() => {
       this.logger.log('Telegram bot launched (ADMIN ONLY MODE)');
     }).catch(err => {
@@ -114,7 +114,7 @@ export class TelegramBotInteractionService implements OnModuleInit {
         }
       });
       this.logger.log(`Feed channel registered: "${chatTitle}" (ID: ${chatId})`);
-      
+
       const adminMessage = `📢 <b>Канал публикаций зарегистрирован</b>\n\n` +
         `🏢 Чат: "${chatTitle}"\n` +
         `🆔 ID: <code>${chatId}</code>`;
@@ -139,7 +139,7 @@ export class TelegramBotInteractionService implements OnModuleInit {
       });
       if (result.count > 0) {
         this.logger.log(`Feed channel unregistered (ID: ${chatId})`);
-        
+
         const adminMessage = `📢 <b>Канал публикаций удален</b>\n\n` +
           `🆔 ID: <code>${chatId}</code>`;
         await this.notifyAdmins(ctx, adminMessage);
@@ -199,8 +199,9 @@ export class TelegramBotInteractionService implements OnModuleInit {
       });
 
       return ctx.reply('Здравствуйте, администратор! Я бот для учета начислений.', Markup.keyboard([
-        ['Добавить оплату', 'Список квартир'],
-        ['Управление пользователями', 'Запустить сканирование']
+        ['Добавить оплату', 'Последние инвойсы'],
+        ['Список квартир', 'Управление пользователями'],
+        ['Запустить сканирование']
       ]).resize());
     } catch (e) {
       this.logger.error('Failed to handle /start', e);
@@ -233,18 +234,18 @@ export class TelegramBotInteractionService implements OnModuleInit {
       if (!tenant) {
         return ctx.answerCbQuery('В этой квартире нет активного арендатора.', { show_alert: true });
       }
-      
+
       const botUser = await this.prisma.user.findUnique({
         where: { tenantId: tenant.id }
       });
       if (!botUser) {
-         return ctx.answerCbQuery('У арендатора нет Telegram.', { show_alert: true });
+        return ctx.answerCbQuery('У арендатора нет Telegram.', { show_alert: true });
       }
 
       ctx.session = ctx.session || {};
       ctx.session.state = 'awaiting_amount';
       ctx.session.paymentTargetTelegramId = botUser.telegramId.toString();
-      
+
       await ctx.answerCbQuery();
       await ctx.editMessageText(`Выбрана квартира. Арендатор: ${tenant.name || 'Неизвестно'}\nВведите сумму оплаты (только число):`, Markup.inlineKeyboard([]));
     } catch (e) {
@@ -282,7 +283,7 @@ export class TelegramBotInteractionService implements OnModuleInit {
       if (isNaN(amount) || amount <= 0) {
         return ctx.reply('Пожалуйста, введите корректную сумму (больше 0).');
       }
-      
+
       const linkData = ctx.session.adminLinkData;
       if (!linkData || !linkData.tenantId || !linkData.apartmentId || !linkData.rentPaymentDay) {
         ctx.session.state = undefined;
@@ -290,16 +291,16 @@ export class TelegramBotInteractionService implements OnModuleInit {
       }
 
       try {
-        await firstValueFrom(this.accountantClient.send('link_tenant_apartment', { 
-          tenantId: linkData.tenantId, 
+        await firstValueFrom(this.accountantClient.send('link_tenant_apartment', {
+          tenantId: linkData.tenantId,
           apartmentId: linkData.apartmentId,
           rentPaymentDay: linkData.rentPaymentDay,
           rentAmount: amount
         }));
-        
+
         ctx.session.state = undefined;
         ctx.session.adminLinkData = undefined;
-        
+
         return ctx.reply(`✅ Арендатор успешно привязан к квартире. Дата оплаты: ${linkData.rentPaymentDay}, Сумма: ${amount}`);
       } catch (e) {
         this.logger.error('Failed to link tenant', e);
@@ -313,15 +314,15 @@ export class TelegramBotInteractionService implements OnModuleInit {
         return ctx.reply('Пожалуйста, введите корректный день месяца (от 1 до 31).');
       }
       try {
-        await firstValueFrom(this.accountantClient.send('update_tenant_payment_settings', { 
-          tenantId: ctx.session.editTenantId, 
-          rentPaymentDay: day 
+        await firstValueFrom(this.accountantClient.send('update_tenant_payment_settings', {
+          tenantId: ctx.session.editTenantId,
+          rentPaymentDay: day
         }));
         const aptId = ctx.session.editApartmentId;
         ctx.session.state = undefined;
         ctx.session.editTenantId = undefined;
         ctx.session.editApartmentId = undefined;
-        
+
         await ctx.reply(`✅ День оплаты успешно изменен на ${day}.`);
         if (aptId) {
           await this.adminInteractionService.showApartmentMenu(ctx, aptId);
@@ -339,15 +340,15 @@ export class TelegramBotInteractionService implements OnModuleInit {
         return ctx.reply('Пожалуйста, введите корректную сумму (больше 0).');
       }
       try {
-        await firstValueFrom(this.accountantClient.send('update_tenant_payment_settings', { 
-          tenantId: ctx.session.editTenantId, 
-          rentAmount: amount 
+        await firstValueFrom(this.accountantClient.send('update_tenant_payment_settings', {
+          tenantId: ctx.session.editTenantId,
+          rentAmount: amount
         }));
         const aptId = ctx.session.editApartmentId;
         ctx.session.state = undefined;
         ctx.session.editTenantId = undefined;
         ctx.session.editApartmentId = undefined;
-        
+
         await ctx.reply(`✅ Сумма аренды успешно изменена на ${amount}.`);
         if (aptId) {
           await this.adminInteractionService.showApartmentMenu(ctx, aptId);
@@ -362,16 +363,16 @@ export class TelegramBotInteractionService implements OnModuleInit {
     if (ctx.session?.state === 'admin_editing_acc_label') {
       const label = (ctx.message as any).text.trim();
       try {
-        await firstValueFrom(this.accountantClient.send('update_account_custom_label', { 
-          accountId: ctx.session.editAccountId, 
-          customLabel: label 
+        await firstValueFrom(this.accountantClient.send('update_account_custom_label', {
+          accountId: ctx.session.editAccountId,
+          customLabel: label
         }));
         const aptId = ctx.session.editApartmentId;
         const accId = ctx.session.editAccountId;
         ctx.session.state = undefined;
         ctx.session.editAccountId = undefined;
         ctx.session.editApartmentId = undefined;
-        
+
         await ctx.reply(`✅ Название аккаунта успешно изменено на "${label}".`);
         if (aptId && accId) {
           await this.adminInteractionService.showAccountMenu(ctx, accId, aptId);
@@ -388,7 +389,7 @@ export class TelegramBotInteractionService implements OnModuleInit {
     if (ctx.session?.state === 'admin_adding_user_name') {
       const name = (ctx.message as any).text.trim();
       ctx.session.adminAddingUserData = { name };
-      
+
       // Show apartment list to pick
       try {
         const apartments = await firstValueFrom(this.accountantClient.send<Apartment[]>('get_apartments', {}));
@@ -411,9 +412,9 @@ export class TelegramBotInteractionService implements OnModuleInit {
         return ctx.reply('Пожалуйста, введите корректный день месяца (от 1 до 31).');
       }
       if (ctx.session.adminAddingUserData) {
-          ctx.session.adminAddingUserData.rentPaymentDay = day;
-          ctx.session.state = 'admin_adding_user_rent_amount';
-          return ctx.reply(`День оплаты: ${day}. Теперь введите сумму ежемесячной аренды (только число):`);
+        ctx.session.adminAddingUserData.rentPaymentDay = day;
+        ctx.session.state = 'admin_adding_user_rent_amount';
+        return ctx.reply(`День оплаты: ${day}. Теперь введите сумму ежемесячной аренды (только число):`);
       }
     }
 
@@ -422,7 +423,7 @@ export class TelegramBotInteractionService implements OnModuleInit {
       if (isNaN(amount) || amount <= 0) {
         return ctx.reply('Пожалуйста, введите корректную сумму (больше 0).');
       }
-      
+
       const data = ctx.session.adminAddingUserData;
       if (!data || !data.name || !data.apartmentId || !data.rentPaymentDay) {
         ctx.session.state = undefined;
@@ -430,16 +431,16 @@ export class TelegramBotInteractionService implements OnModuleInit {
       }
 
       try {
-        await firstValueFrom(this.accountantClient.send('create_active_tenant_manual', { 
+        await firstValueFrom(this.accountantClient.send('create_active_tenant_manual', {
           name: data.name,
           apartmentId: data.apartmentId,
           rentPaymentDay: data.rentPaymentDay,
           rentAmount: amount
         }));
-        
+
         ctx.session.state = undefined;
         ctx.session.adminAddingUserData = undefined;
-        
+
         return ctx.reply(`✅ Пользователь "${data.name}" успешно добавлен и привязан к квартире.`);
       } catch (e) {
         this.logger.error('Failed to create manual tenant', e);
@@ -456,7 +457,7 @@ export class TelegramBotInteractionService implements OnModuleInit {
       const photo = message.photo[message.photo.length - 1];
       const amount = ctx.session.amount;
       const targetTelegramId = ctx.session.paymentTargetTelegramId || ctx.from!.id;
-      
+
       this.logger.log(`Admin ${ctx.from!.id} submitted payment for amount ${amount} (Target: ${targetTelegramId})`);
 
       // Save to DB via accountant
@@ -492,7 +493,7 @@ export class TelegramBotInteractionService implements OnModuleInit {
     if (ctx.session?.state === 'awaiting_photo') {
       const amount = ctx.session.amount;
       const targetTelegramId = ctx.session.paymentTargetTelegramId || ctx.from.id;
-      
+
       this.logger.log(`Admin ${ctx.from.id} submitted payment without photo for amount ${amount} (Target: ${targetTelegramId})`);
 
       try {
