@@ -160,6 +160,7 @@ export class AccountantService {
         periodLabel: data.periodLabel,
         amountText: data.amountText,
         statusText: data.statusText,
+        rawJson: result.rawJson,
         apartment: {
           id: account.apartmentId,
           address: account.apartment?.address || account.apartment?.externalId || 'неизвестен'

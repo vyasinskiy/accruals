@@ -114,11 +114,15 @@ export class TelegramBotController {
     this.logger.log(`Rent reminder notification sent to tenant chatId ${data.chatId}`);
   }
 
+  /**
+   * Метод только для публикации нового начисления (без файла инвойса).
+   */
   @EventPattern('accrual_upserted')
   async handleAccrualUpserted(@Payload() data: { 
     periodLabel: string; 
     amountText: string; 
     statusText: string; 
+    rawJson?: string;
     apartment?: { id: number; address?: string };
     tenant?: { id: number; status: string };
   }) {
@@ -164,10 +168,33 @@ export class TelegramBotController {
 
     if (targetChatIds.size === 0) return;
 
+    let amount = data.amountText || 'Не указана';
+    let status = data.statusText || 'Неизвестен';
+    try {
+      const raw = JSON.parse(data.rawJson || '{}');
+      const acc = raw.accrual || {};
+      const btn = acc.button || {};
+
+      const val = (acc.accruedAmount !== undefined && Number(acc.accruedAmount) !== 0) ? Number(acc.accruedAmount) :
+                  (acc.amountToPay !== undefined && Number(acc.amountToPay) !== 0) ? Number(acc.amountToPay) :
+                  (acc.paidAmount !== undefined ? Number(acc.paidAmount) : 0);
+      amount = `${val.toFixed(2)} руб.`;
+
+      if (btn.pay === true && Number(btn.toPay) > 0) {
+        status = 'Ожидает оплаты';
+      } else if (acc.amountToPay === 0 || Number(btn.toPay) === 0) {
+        status = 'Оплачено';
+      } else if (btn.message) {
+        status = btn.message;
+      }
+    } catch (e) {
+      // fallback
+    }
+
     const message = `🔔 <b>Новое начисление!</b>\n\n` +
       `Период: ${data.periodLabel}\n` +
-      `Сумма: ${data.amountText}\n` +
-      `Статус: ${data.statusText}\n` +
+      `Сумма: ${amount}\n` +
+      `Статус: ${status}\n` +
       `Адрес: ${apartmentAddress}`;
 
     for (const chatId of targetChatIds) {
@@ -181,6 +208,9 @@ export class TelegramBotController {
     }
   }
 
+  /**
+   * Метод для публикации нового инвойса (с файлом инвойса/квитанцией из S3).
+   */
   @EventPattern('invoice_available')
   async handleInvoiceAvailable(@Payload() data: { 
     id: number;
