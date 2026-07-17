@@ -5,6 +5,7 @@ import { firstValueFrom } from 'rxjs';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { config } from '../../common/config/config';
 import { Apartment, Account, User, Invoice } from './types';
+import { formatMeterSubmissionMessage, getMeterSubmissionButtons } from '../telegram-bot/telegram-bot.controller';
 
 @Injectable()
 export class AdminInteractionService {
@@ -833,6 +834,129 @@ export class AdminInteractionService {
         const message = error instanceof Error ? error.message : String(error);
         this.logger.error(`Failed to reject payment ${paymentId}: ${message}`);
         await ctx.answerCbQuery('Ошибка при отклонении');
+      }
+    });
+
+    // Action: Confirm Meter Readings Received
+    bot.action(/admin_confirm_readings_received_(\d+)/, async (ctx) => {
+      const eventId = parseInt(ctx.match[1], 10);
+      try {
+        const res = await firstValueFrom(
+          this.accountantClient.send<{ success: boolean; event?: any; message?: string }>('mark_readings_received', { eventId })
+        );
+
+        if (res && res.success) {
+          const event = res.event;
+          const accountLabel = event?.account?.customLabel || [event?.account?.accountNumber, event?.account?.accountLabel].filter(Boolean).join(' ') || event?.account?.externalId || '';
+          const address = event?.account?.apartment?.address || event?.account?.apartment?.externalId || '';
+
+          const message = formatMeterSubmissionMessage({
+            periodLabel: event.periodLabel,
+            apartmentAddress: address,
+            accountLabel: accountLabel,
+            status: event.status,
+            readingsValue: event.readingsValue
+          });
+
+          const extra = getMeterSubmissionButtons({
+            id: event.id,
+            status: event.status
+          });
+
+          await ctx.editMessageText(message, { parse_mode: 'HTML', ...extra });
+          await ctx.answerCbQuery('Показания получены');
+        } else {
+          await ctx.answerCbQuery(res?.message || 'Ошибка обновления');
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.logger.error(`Failed to mark readings received: ${message}`);
+        await ctx.answerCbQuery('Ошибка при отправке запроса');
+      }
+    });
+
+    // Action: Start Entering Meter Readings Value
+    bot.action(/admin_enter_readings_(\d+)/, async (ctx: any) => {
+      const eventId = parseInt(ctx.match[1], 10);
+      try {
+        ctx.session = ctx.session || {};
+        ctx.session.state = 'awaiting_meter_readings';
+        ctx.session.eventId = eventId;
+        ctx.session.messageId = ctx.callbackQuery.message.message_id;
+        ctx.session.chatId = ctx.callbackQuery.message.chat.id;
+
+        await ctx.answerCbQuery();
+        await ctx.reply('📥 Пожалуйста, введите показания счетчика текстом в следующем сообщении (например: "245.3 м³" или просто цифры):');
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.logger.error(`Failed to start entering readings: ${message}`);
+        await ctx.answerCbQuery('Ошибка при начале ввода');
+      }
+    });
+
+    // Action: Confirm Meter Readings Submitted to Service (Final)
+    bot.action(/admin_submit_readings_(\d+)/, async (ctx) => {
+      const eventId = parseInt(ctx.match[1], 10);
+      try {
+        const res = await firstValueFrom(
+          this.accountantClient.send<{ success: boolean; event?: any; message?: string }>('submit_meter_readings', { eventId })
+        );
+
+        if (res && res.success) {
+          const event = res.event;
+          const accountLabel = event?.account?.customLabel || [event?.account?.accountNumber, event?.account?.accountLabel].filter(Boolean).join(' ') || event?.account?.externalId || '';
+          const address = event?.account?.apartment?.address || event?.account?.apartment?.externalId || '';
+
+          const message = formatMeterSubmissionMessage({
+            periodLabel: event.periodLabel,
+            apartmentAddress: address,
+            accountLabel: accountLabel,
+            status: event.status,
+            readingsValue: event.readingsValue
+          });
+
+          await ctx.editMessageText(message, { parse_mode: 'HTML' });
+          await ctx.answerCbQuery('Показания успешно переданы');
+        } else {
+          await ctx.answerCbQuery(res?.message || 'Ошибка подтверждения');
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.logger.error(`Failed to submit readings: ${message}`);
+        await ctx.answerCbQuery('Ошибка при отправке подтверждения');
+      }
+    });
+
+    // Action: Complete reminders without submission (Final)
+    bot.action(/admin_complete_without_sub_(\d+)/, async (ctx) => {
+      const eventId = parseInt(ctx.match[1], 10);
+      try {
+        const res = await firstValueFrom(
+          this.accountantClient.send<{ success: boolean; event?: any; message?: string }>('complete_without_submission', { eventId })
+        );
+
+        if (res && res.success) {
+          const event = res.event;
+          const accountLabel = event?.account?.customLabel || [event?.account?.accountNumber, event?.account?.accountLabel].filter(Boolean).join(' ') || event?.account?.externalId || '';
+          const address = event?.account?.apartment?.address || event?.account?.apartment?.externalId || '';
+
+          const message = formatMeterSubmissionMessage({
+            periodLabel: event.periodLabel,
+            apartmentAddress: address,
+            accountLabel: accountLabel,
+            status: event.status,
+            readingsValue: event.readingsValue
+          });
+
+          await ctx.editMessageText(message, { parse_mode: 'HTML' });
+          await ctx.answerCbQuery('Напоминания завершены');
+        } else {
+          await ctx.answerCbQuery(res?.message || 'Ошибка обновления');
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.logger.error(`Failed to complete without submission: ${message}`);
+        await ctx.answerCbQuery('Ошибка при отправке запроса');
       }
     });
   }

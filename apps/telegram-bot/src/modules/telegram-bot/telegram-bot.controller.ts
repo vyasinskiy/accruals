@@ -1,5 +1,5 @@
 import { Controller, Inject, Logger } from '@nestjs/common';
-import { EventPattern, Payload, ClientProxy } from '@nestjs/microservices';
+import { EventPattern, MessagePattern, Payload, ClientProxy } from '@nestjs/microservices';
 import { TelegramBotNotificationService } from './telegram-bot-notification.service';
 import { Markup } from 'telegraf';
 import { firstValueFrom } from 'rxjs';
@@ -327,6 +327,58 @@ export class TelegramBotController {
     }
   }
 
+  @MessagePattern('meter_submission_required')
+  async handleMeterSubmissionRequired(@Payload() data: {
+    eventId: number;
+    accountExternalId: string;
+    accountLabel: string;
+    apartmentAddress: string;
+    periodLabel: string;
+  }) {
+    this.logger.log(`Received meter_submission_required for event ${data.eventId}`);
+    const message = formatMeterSubmissionMessage({
+      periodLabel: data.periodLabel,
+      apartmentAddress: data.apartmentAddress,
+      accountLabel: data.accountLabel,
+      status: 'PENDING',
+      readingsValue: null
+    });
+
+    const extra = getMeterSubmissionButtons({
+      id: data.eventId,
+      status: 'PENDING'
+    });
+
+    const success = await this.notifyAdmins(message, 'meter_submission_required', extra);
+    return { success };
+  }
+
+  @MessagePattern('meter_submission_reminder')
+  async handleMeterSubmissionReminder(@Payload() data: {
+    eventId: number;
+    accountExternalId: string;
+    accountLabel: string;
+    apartmentAddress: string;
+    periodLabel: string;
+  }) {
+    this.logger.log(`Received meter_submission_reminder for event ${data.eventId}`);
+    const message = formatMeterSubmissionMessage({
+      periodLabel: data.periodLabel,
+      apartmentAddress: data.apartmentAddress,
+      accountLabel: data.accountLabel,
+      status: 'PENDING',
+      readingsValue: null
+    });
+
+    const extra = getMeterSubmissionButtons({
+      id: data.eventId,
+      status: 'PENDING'
+    });
+
+    const success = await this.notifyAdmins(message, 'meter_submission_reminder', extra);
+    return { success };
+  }
+
   @EventPattern('scan_completed')
   async handleScanCompleted(@Payload() data: {
     startedAt: string;
@@ -388,7 +440,7 @@ export class TelegramBotController {
     actionName: string,
     extra?: any,
     receiptPhotoId?: string | null
-  ) {
+  ): Promise<boolean> {
     try {
       const admins = await this.prisma.user.findMany({ where: { role: 'admin' } });
       const targetChatIds = new Set<string>();
@@ -401,6 +453,7 @@ export class TelegramBotController {
 
       this.logger.log(`Notifying ${targetChatIds.size} admins about: ${actionName}`);
 
+      let sentCount = 0;
       for (const chatId of targetChatIds) {
         try {
           if (receiptPhotoId) {
@@ -408,12 +461,67 @@ export class TelegramBotController {
           } else {
             await this.botService.sendAdminNotification(message, chatId, extra);
           }
+          sentCount++;
         } catch (err: any) {
           this.logger.error(`Failed to send ${actionName} notification to admin ${chatId}: ${err.message}`);
         }
       }
+      return sentCount > 0;
     } catch (e: any) {
       this.logger.error(`Failed to execute notifyAdmins for ${actionName}: ${e.message}`);
+      return false;
     }
   }
+}
+
+export function formatMeterSubmissionMessage(data: {
+  periodLabel: string;
+  apartmentAddress: string;
+  accountLabel: string;
+  status?: string;
+  readingsValue?: string | null;
+}) {
+  let statusText = '⏳ Ожидает получения от арендатора';
+  if (data.status === 'COMPLETED_WITHOUT_SUBMISSION') {
+    statusText = '❌ Завершено без передачи';
+  } else if (data.status === 'SUBMITTED') {
+    statusText = '✅ Переданы в службу';
+  } else if (data.status === 'RECEIVED') {
+    statusText = '📩 Получены от арендатора (ожидают отправки)';
+  }
+
+  const readingsText = data.readingsValue ? `<code>${data.readingsValue}</code>` : '<i>(не введены)</i>';
+
+  return `🔔 <b>Подача показаний счетчиков</b>\n\n` +
+    `🏠 <b>Адрес:</b> ${data.apartmentAddress}\n` +
+    `🧾 <b>Счет:</b> ${data.accountLabel}\n` +
+    `📅 <b>Период:</b> ${data.periodLabel}\n` +
+    `📊 <b>Статус:</b> ${statusText}\n` +
+    `📝 <b>Показания:</b> ${readingsText}\n\n` +
+    `Пожалуйста, выполните необходимые действия ниже.`;
+}
+
+export function getMeterSubmissionButtons(event: {
+  id: number;
+  status?: string;
+}) {
+  if (event.status === 'SUBMITTED' || event.status === 'COMPLETED_WITHOUT_SUBMISSION') {
+    return Markup.inlineKeyboard([]); // Нет кнопок для финальных статусов
+  }
+
+  if (event.status === 'RECEIVED') {
+    return Markup.inlineKeyboard([
+      [Markup.button.callback('📤 Отметить как переданные', `admin_submit_readings_${event.id}`)],
+      [Markup.button.callback('📝 Изменить показания', `admin_enter_readings_${event.id}`)],
+      [Markup.button.callback('❌ Завершить без передачи', `admin_complete_without_sub_${event.id}`)]
+    ]);
+  }
+
+  return Markup.inlineKeyboard([
+    [
+      Markup.button.callback('✅ Получены', `admin_confirm_readings_received_${event.id}`),
+      Markup.button.callback('📥 Ввести показания', `admin_enter_readings_${event.id}`)
+    ],
+    [Markup.button.callback('❌ Завершить без передачи', `admin_complete_without_sub_${event.id}`)]
+  ]);
 }

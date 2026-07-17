@@ -6,10 +6,11 @@ import { firstValueFrom } from 'rxjs';
 import { AdminInteractionService } from '../admin/admin-interaction.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { Apartment } from '../admin/types';
+import { formatMeterSubmissionMessage, getMeterSubmissionButtons } from './telegram-bot.controller';
 
 interface MyContext extends Context {
   session: {
-    state?: 'awaiting_amount' | 'awaiting_photo' | 'awaiting_admin_rent_day' | 'awaiting_admin_rent_amount' | 'admin_editing_rent_day' | 'admin_editing_rent_amount' | 'admin_editing_acc_label' | 'admin_adding_user_name' | 'admin_adding_user_rent_day' | 'admin_adding_user_rent_amount';
+    state?: 'awaiting_amount' | 'awaiting_photo' | 'awaiting_admin_rent_day' | 'awaiting_admin_rent_amount' | 'admin_editing_rent_day' | 'admin_editing_rent_amount' | 'admin_editing_acc_label' | 'admin_adding_user_name' | 'admin_adding_user_rent_day' | 'admin_adding_user_rent_amount' | 'awaiting_meter_readings';
     amount?: number;
     paymentTargetTelegramId?: string;
     editTenantId?: number;
@@ -25,6 +26,9 @@ interface MyContext extends Context {
       apartmentId?: number;
       rentPaymentDay?: number;
     };
+    eventId?: number;
+    messageId?: number;
+    chatId?: number;
   };
 }
 
@@ -255,6 +259,68 @@ export class TelegramBotInteractionService implements OnModuleInit {
   }
 
   private async handleTextMessage(ctx: MyContext, next: () => Promise<void>) {
+    if (ctx.session?.state === 'awaiting_meter_readings') {
+      const text = (ctx.message as any).text?.trim();
+      if (!text) {
+        return ctx.reply('Пожалуйста, введите показания текстом.');
+      }
+
+      const eventId = ctx.session.eventId;
+      const messageId = ctx.session.messageId;
+      const chatId = ctx.session.chatId;
+
+      try {
+        const res = await firstValueFrom(
+          this.accountantClient.send<{ success: boolean; event?: any; message?: string }>('submit_meter_readings_value', {
+            eventId,
+            value: text
+          })
+        );
+
+        if (res && res.success) {
+          const event = res.event;
+          const accountLabel = event?.account?.customLabel || [event?.account?.accountNumber, event?.account?.accountLabel].filter(Boolean).join(' ') || event?.account?.externalId || '';
+          const address = event?.account?.apartment?.address || event?.account?.apartment?.externalId || '';
+
+          const message = formatMeterSubmissionMessage({
+            periodLabel: event.periodLabel,
+            apartmentAddress: address,
+            accountLabel: accountLabel,
+            status: event.status,
+            readingsValue: event.readingsValue
+          });
+
+          const extra = getMeterSubmissionButtons({
+            id: event.id,
+            status: event.status
+          });
+
+          // Reset state
+          ctx.session.state = undefined;
+          ctx.session.eventId = undefined;
+          ctx.session.messageId = undefined;
+          ctx.session.chatId = undefined;
+
+          // Edit original message with new status & buttons
+          if (chatId && messageId) {
+            try {
+              await ctx.telegram.editMessageText(chatId, messageId, undefined, message, { parse_mode: 'HTML', ...extra });
+            } catch (editError: any) {
+              this.logger.warn(`Failed to edit original message: ${editError.message}`);
+            }
+          }
+
+          return ctx.reply(`✅ Показания "${text}" успешно сохранены!`);
+        } else {
+          return ctx.reply(`❌ Ошибка сохранения: ${res?.message || 'Неизвестная ошибка'}`);
+        }
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        this.logger.error(`Failed to submit readings value: ${msg}`);
+        return ctx.reply('❌ Ошибка связи с сервером при сохранении показаний.');
+      }
+    }
+
     if (ctx.session?.state === 'awaiting_amount') {
       const amount = parseFloat((ctx.message as any).text.replace(',', '.'));
       if (isNaN(amount)) {

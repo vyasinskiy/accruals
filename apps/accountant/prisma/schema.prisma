@@ -61,11 +61,13 @@ model Account {
   customLabel   String?   @map("custom_label")
   balance       Decimal?  @db.Decimal(10, 2)
   rawJson       String?   @map("raw_json")
-  firstSeenAt   DateTime  @map("first_seen_at")
-  lastSeenAt    DateTime  @map("last_seen_at")
-  apartment     Apartment @relation(fields: [apartmentId], references: [id], onDelete: Cascade)
-  accruals      Accrual[]
-  invoices      Invoice[]
+  firstSeenAt         DateTime  @map("first_seen_at")
+  lastSeenAt          DateTime  @map("last_seen_at")
+  meterSubmissionDay  Int       @default(20) @map("meter_submission_day")
+  apartment           Apartment @relation(fields: [apartmentId], references: [id], onDelete: Cascade)
+  accruals            Accrual[]
+  invoices            Invoice[]
+  meterEvents         MeterSubmissionEvent[]
 
   @@index([accountNumber], map: "idx_accounts_number")
   @@map("accounts")
@@ -127,5 +129,26 @@ model Payment {
   user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("payments")
+}
+
+model MeterSubmissionEvent {
+  id               Int       @id @default(autoincrement())
+  accountId        Int       @map("account_id")
+  periodId         String    @map("period_id")
+  periodLabel      String    @map("period_label")
+  targetDate       DateTime  @map("target_date")
+  notificationSent Boolean   @default(false) @map("notification_sent")
+  status           String    @default("PENDING")
+  receivedAt       DateTime? @map("received_at")
+  readingsValue    String?   @map("readings_value")
+  submittedAt      DateTime? @map("submitted_at")
+  lastReminderSent DateTime? @map("last_reminder_sent")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  account          Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, periodId])
+  @@map("meter_submission_events")
 }
 
