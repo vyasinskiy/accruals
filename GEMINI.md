@@ -1,27 +1,27 @@
-# Project Instructions & Conventions
+# Инструкции и соглашения по проекту (Project Instructions & Conventions)
 
-## Architecture & Design Patterns
+## Архитектура и дизайн-паттерны
 
-### Notification Decoupling
-- **Mandatory**: Core services (e.g., `Accountant`) must NEVER handle UI-specific formatting or delivery details (like Telegram HTML tags or bot-specific strings).
-- **Workflow**: 
-    1. Core service performs business logic.
-    2. Core service emits a structured data event (e.g., `payment_created`, `tenant_registered`) via the message broker.
-    3. The interface service (e.g., `Telegram Bot`) listens for these events.
-    4. The interface service formats the message and handles delivery (including buttons, photos, and specific chat routing).
+### Изоляция уведомлений (Notification Decoupling)
+- **Обязательно**: Основные сервисы (например, `Accountant`) никогда не должны содержать логику форматирования или доставки для конкретных интерфейсов (таких как HTML-разметка Telegram или отправка боту).
+- **Сценарий процесса**:
+    1. Основной сервис выполняет бизнес-логику.
+    2. Основной сервис отправляет структурированное событие (например, `payment_created`, `tenant_registered`) с сырыми данными через брокер сообщений.
+    3. Сервис интерфейса (например, `Telegram Bot`) слушает это событие.
+    4. Сервис интерфейса форматирует сообщение под требования платформы (добавляет кнопки, разметку) и осуществляет отправку.
 
-### Microservices Communication
-- Use RabbitMQ for inter-service communication.
-- Prefer asynchronous events (`emit`) for notifications and side effects.
-- Use request-response (`send`) for data fetching across services.
+### Взаимодействие микросервисов
+- Использовать RabbitMQ для межсервисного взаимодействия.
+- Использовать асинхронные события (`emit`) для уведомлений и побочных эффектов.
+- Использовать синхронные запросы-ответы (`send`) для получения данных между сервисами.
 
-## Development Standards
-- All project documentation and code comments should be in English.
-- Use Prisma for database interactions.
-- **Prisma Migrations**: Any change to `schema.prisma` MUST be accompanied by a generated migration file in the `prisma/migrations` folder. Use `npx prisma migrate dev --name <description>` during development to ensure the schema and database stay in sync and the migration is tracked in source control.
-- **Prisma Versioning**: Always use `npm run prisma:generate` or `npm run prisma:migrate` instead of `npx prisma`. This ensures the project stays on version 6.6.0 and avoids breaking changes introduced in Prisma 7.
-- **Prisma Monorepo Isolation**: To prevent TypeScript type conflicts across microservices (where generating a client for one service overwrites the generic `@prisma/client` used by another), the project uses isolated internal clients.
-    - The `schema.prisma` file explicitly outputs to a local directory: `output = "../src/generated/client"`.
-    - Services import their specific client directly: `import { PrismaClient } from '../../generated/client'`.
-    - *Crucial for Docker*: Ensure `RUN mkdir -p src/generated/client/runtime` is present in Dockerfiles before `prisma generate` to prevent `ENOENT` copyfile bugs on Alpine.
-- Ensure all BigInt values are serialized correctly when passing through the message broker.
+## Стандарты разработки
+- Вся документация по проекту и комментарии в коде должны быть на английском языке.
+- Использовать Prisma для взаимодействия с базой данных.
+- **Миграции Prisma**: Любое изменение в файле `schema.prisma` должно обязательно сопровождаться сгенерированным файлом миграции в папке `prisma/migrations`. Используйте команду `npx prisma migrate dev --name <description>` во время разработки.
+- **Версионирование Prisma**: Всегда запускайте миграции и генерацию клиента через скрипты из `package.json` (например, `npm run prisma:generate` или `npm run prisma:migrate`) вместо прямых вызовов `npx prisma`. Это гарантирует использование версии `6.6.0` и предотвращает ломающие изменения Prisma 7.
+- **Изоляция Prisma в монорепозитории**: Чтобы избежать конфликтов типов TypeScript между микросервисами (где генерация клиента для одного сервиса затирает клиент другого), проект использует локально изолированные клиенты.
+    - В `schema.prisma` путь вывода клиента должен быть явно переопределен: `output = "../src/generated/client"`.
+    - Сервисы должны импортировать клиент напрямую из локальной папки: `import { PrismaClient } from '../../generated/client'`.
+    - *Важно для Docker*: Обязательно добавляйте инструкцию `RUN mkdir -p src/generated/client/runtime` в Dockerfile перед вызовом `prisma generate` для предотвращения ошибок копирования файлов в Alpine.
+- Убедитесь, что все значения типа `BigInt` сериализуются корректно перед отправкой через брокер сообщений.
