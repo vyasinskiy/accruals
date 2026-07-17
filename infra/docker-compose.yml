@@ -106,6 +106,25 @@ services:
     networks:
       - accruals-network
 
+  admin-ui:
+    image: accruals-admin-ui:latest
+    build:
+      context: ${ADMIN_UI_PATH:-../apps/admin-ui}
+      dockerfile: Dockerfile
+    container_name: accruals-admin-ui
+    restart: unless-stopped
+    ports:
+      - '3000:3000'
+    env_file:
+      - ${ADMIN_UI_PATH:-../apps/admin-ui}/.env
+    environment:
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASS:-guest}@rabbitmq:5672
+      PORT: 3000
+    depends_on:
+      rabbitmq:
+        condition: service_started
+      accountant:
+        condition: service_started
   telegram-bot:
     image: accruals-telegram-bot:latest
     build:

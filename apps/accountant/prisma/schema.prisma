@@ -115,6 +115,7 @@ model Invoice {
 }
 
 model Payment {
+  // existing fields remain unchanged
   id               Int      @id @default(autoincrement())
   userId           Int      @map("user_id")
   userName         String?  @map("user_name")
@@ -152,3 +153,12 @@ model MeterSubmissionEvent {
   @@map("meter_submission_events")
 }
 
+
+model Event {
+  id        Int      @id @default(autoincrement())
+  type      String
+  date      DateTime
+  status    String   @default("pending")
+  details   String?
+  createdAt DateTime @default(now())
+}

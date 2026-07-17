@@ -1,0 +1,7 @@
+/* app/layout.module.css */
+.body {
+  background: #f5f7fa; /* matches light premium background */
+  font-family: 'Inter', sans-serif;
+  color: #333;
+  min-height: 100vh;
+}

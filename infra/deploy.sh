@@ -18,9 +18,10 @@ if [ -f .env ]; then
     set +a
 fi
 
-WATCHER_PATH=${WATCHER_PATH:-../accruals-watcher}
-ACCOUNTANT_PATH=${ACCOUNTANT_PATH:-../accruals-accountant}
-TELEGRAM_BOT_PATH=${TELEGRAM_BOT_PATH:-../accruals-telegram-bot}
+WATCHER_PATH=${WATCHER_PATH:-../apps/watcher}
+ACCOUNTANT_PATH=${ACCOUNTANT_PATH:-../apps/accountant}
+TELEGRAM_BOT_PATH=${TELEGRAM_BOT_PATH:-../apps/telegram-bot}
+ADMIN_UI_PATH=${ADMIN_UI_PATH:-../apps/admin-ui}
 
 # 2. Build images
 echo "📦 Building Watcher..."
@@ -29,6 +30,8 @@ echo "📦 Building Accountant..."
 docker build -t accruals-accountant:latest "${ACCOUNTANT_PATH}"
 echo "📦 Building Telegram Bot..."
 docker build -t accruals-telegram-bot:latest "${TELEGRAM_BOT_PATH}"
+echo "📦 Building Admin UI..."
+docker build -t accruals-admin-ui:latest "${ADMIN_UI_PATH}"
 
 # 3. Start the infrastructure
 echo "🏗️  Starting infrastructure services (Database, RabbitMQ)..."
