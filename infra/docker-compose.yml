@@ -76,6 +76,7 @@ services:
         condition: service_started
     volumes:
       - ${WATCHER_PATH:-../apps/watcher}/data:/app/data
+      - ./logs/watcher:/app/logs
     networks:
       - accruals-network
 
@@ -100,6 +101,8 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_started
+    volumes:
+      - ./logs/accountant:/app/logs
     networks:
       - accruals-network
 
@@ -121,6 +124,8 @@ services:
         condition: service_started
       accountant:
         condition: service_started
+    volumes:
+      - ./logs/telegram-bot:/app/logs
     networks:
       - accruals-network
 

@@ -6,6 +6,24 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { config } from '../../common/config/config';
 import { Apartment, Account, User, Invoice } from './types';
 import { formatMeterSubmissionMessage, getMeterSubmissionButtons } from '../telegram-bot/telegram-bot.controller';
+import { MyContext } from '../telegram-bot/telegram-bot-interaction.service';
+
+export interface MeterEventResponse {
+  id: number;
+  status: string;
+  periodLabel: string;
+  readingsValue?: string | null;
+  account: {
+    externalId: string;
+    accountNumber?: string | null;
+    accountLabel?: string | null;
+    customLabel?: string | null;
+    apartment: {
+      address?: string | null;
+      externalId: string;
+    };
+  };
+}
 
 @Injectable()
 export class AdminInteractionService {
@@ -309,7 +327,7 @@ export class AdminInteractionService {
     }
   }
 
-  registerHandlers(bot: Telegraf<any>) {
+  registerHandlers(bot: Telegraf<MyContext>) {
     bot.hears('Последние инвойсы', async (ctx) => {
       await this.showLatestAccruals(ctx, 1);
     });
@@ -839,16 +857,20 @@ export class AdminInteractionService {
 
     // Action: Confirm Meter Readings Received
     bot.action(/admin_confirm_readings_received_(\d+)/, async (ctx) => {
-      const eventId = parseInt(ctx.match[1], 10);
+      const match = ctx.match;
+      if (!match) {
+        return;
+      }
+      const eventId = parseInt(match[1], 10);
       try {
         const res = await firstValueFrom(
-          this.accountantClient.send<{ success: boolean; event?: any; message?: string }>('mark_readings_received', { eventId })
+          this.accountantClient.send<{ success: boolean; event?: MeterEventResponse; message?: string }>('mark_readings_received', { eventId })
         );
 
-        if (res && res.success) {
+        if (res && res.success && res.event) {
           const event = res.event;
-          const accountLabel = event?.account?.customLabel || [event?.account?.accountNumber, event?.account?.accountLabel].filter(Boolean).join(' ') || event?.account?.externalId || '';
-          const address = event?.account?.apartment?.address || event?.account?.apartment?.externalId || '';
+          const accountLabel = event.account.customLabel || [event.account.accountNumber, event.account.accountLabel].filter(Boolean).join(' ') || event.account.externalId;
+          const address = event.account.apartment.address || event.account.apartment.externalId;
 
           const message = formatMeterSubmissionMessage({
             periodLabel: event.periodLabel,
@@ -876,14 +898,21 @@ export class AdminInteractionService {
     });
 
     // Action: Start Entering Meter Readings Value
-    bot.action(/admin_enter_readings_(\d+)/, async (ctx: any) => {
-      const eventId = parseInt(ctx.match[1], 10);
+    bot.action(/admin_enter_readings_(\d+)/, async (ctx: MyContext) => {
+      const match = ctx.match;
+      if (!match) {
+        return;
+      }
+      const eventId = parseInt(match[1], 10);
       try {
         ctx.session = ctx.session || {};
         ctx.session.state = 'awaiting_meter_readings';
         ctx.session.eventId = eventId;
-        ctx.session.messageId = ctx.callbackQuery.message.message_id;
-        ctx.session.chatId = ctx.callbackQuery.message.chat.id;
+        const msg = ctx.callbackQuery?.message;
+        if (msg) {
+          ctx.session.messageId = msg.message_id;
+          ctx.session.chatId = msg.chat.id;
+        }
 
         await ctx.answerCbQuery();
         await ctx.reply('📥 Пожалуйста, введите показания счетчика текстом в следующем сообщении (например: "245.3 м³" или просто цифры):');
@@ -896,16 +925,20 @@ export class AdminInteractionService {
 
     // Action: Confirm Meter Readings Submitted to Service (Final)
     bot.action(/admin_submit_readings_(\d+)/, async (ctx) => {
-      const eventId = parseInt(ctx.match[1], 10);
+      const match = ctx.match;
+      if (!match) {
+        return;
+      }
+      const eventId = parseInt(match[1], 10);
       try {
         const res = await firstValueFrom(
-          this.accountantClient.send<{ success: boolean; event?: any; message?: string }>('submit_meter_readings', { eventId })
+          this.accountantClient.send<{ success: boolean; event?: MeterEventResponse; message?: string }>('submit_meter_readings', { eventId })
         );
 
-        if (res && res.success) {
+        if (res && res.success && res.event) {
           const event = res.event;
-          const accountLabel = event?.account?.customLabel || [event?.account?.accountNumber, event?.account?.accountLabel].filter(Boolean).join(' ') || event?.account?.externalId || '';
-          const address = event?.account?.apartment?.address || event?.account?.apartment?.externalId || '';
+          const accountLabel = event.account.customLabel || [event.account.accountNumber, event.account.accountLabel].filter(Boolean).join(' ') || event.account.externalId;
+          const address = event.account.apartment.address || event.account.apartment.externalId;
 
           const message = formatMeterSubmissionMessage({
             periodLabel: event.periodLabel,
@@ -929,16 +962,20 @@ export class AdminInteractionService {
 
     // Action: Complete reminders without submission (Final)
     bot.action(/admin_complete_without_sub_(\d+)/, async (ctx) => {
-      const eventId = parseInt(ctx.match[1], 10);
+      const match = ctx.match;
+      if (!match) {
+        return;
+      }
+      const eventId = parseInt(match[1], 10);
       try {
         const res = await firstValueFrom(
-          this.accountantClient.send<{ success: boolean; event?: any; message?: string }>('complete_without_submission', { eventId })
+          this.accountantClient.send<{ success: boolean; event?: MeterEventResponse; message?: string }>('complete_without_submission', { eventId })
         );
 
-        if (res && res.success) {
+        if (res && res.success && res.event) {
           const event = res.event;
-          const accountLabel = event?.account?.customLabel || [event?.account?.accountNumber, event?.account?.accountLabel].filter(Boolean).join(' ') || event?.account?.externalId || '';
-          const address = event?.account?.apartment?.address || event?.account?.apartment?.externalId || '';
+          const accountLabel = event.account.customLabel || [event.account.accountNumber, event.account.accountLabel].filter(Boolean).join(' ') || event.account.externalId;
+          const address = event.account.apartment.address || event.account.apartment.externalId;
 
           const message = formatMeterSubmissionMessage({
             periodLabel: event.periodLabel,

@@ -8,7 +8,8 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { Apartment } from '../admin/types';
 import { formatMeterSubmissionMessage, getMeterSubmissionButtons } from './telegram-bot.controller';
 
-interface MyContext extends Context {
+export interface MyContext extends Context {
+  match?: RegExpExecArray;
   session: {
     state?: 'awaiting_amount' | 'awaiting_photo' | 'awaiting_admin_rent_day' | 'awaiting_admin_rent_amount' | 'admin_editing_rent_day' | 'admin_editing_rent_amount' | 'admin_editing_acc_label' | 'admin_adding_user_name' | 'admin_adding_user_rent_day' | 'admin_adding_user_rent_amount' | 'awaiting_meter_readings';
     amount?: number;
@@ -260,7 +261,8 @@ export class TelegramBotInteractionService implements OnModuleInit {
 
   private async handleTextMessage(ctx: MyContext, next: () => Promise<void>) {
     if (ctx.session?.state === 'awaiting_meter_readings') {
-      const text = (ctx.message as any).text?.trim();
+      const messageObj = ctx.message;
+      const text = (messageObj && 'text' in messageObj) ? messageObj.text?.trim() : undefined;
       if (!text) {
         return ctx.reply('Пожалуйста, введите показания текстом.');
       }
@@ -270,17 +272,34 @@ export class TelegramBotInteractionService implements OnModuleInit {
       const chatId = ctx.session.chatId;
 
       try {
+        interface MeterEventResponse {
+          id: number;
+          status: string;
+          periodLabel: string;
+          readingsValue?: string | null;
+          account: {
+            externalId: string;
+            accountNumber?: string | null;
+            accountLabel?: string | null;
+            customLabel?: string | null;
+            apartment: {
+              address?: string | null;
+              externalId: string;
+            };
+          };
+        }
+
         const res = await firstValueFrom(
-          this.accountantClient.send<{ success: boolean; event?: any; message?: string }>('submit_meter_readings_value', {
+          this.accountantClient.send<{ success: boolean; event?: MeterEventResponse; message?: string }>('submit_meter_readings_value', {
             eventId,
             value: text
           })
         );
 
-        if (res && res.success) {
+        if (res && res.success && res.event) {
           const event = res.event;
-          const accountLabel = event?.account?.customLabel || [event?.account?.accountNumber, event?.account?.accountLabel].filter(Boolean).join(' ') || event?.account?.externalId || '';
-          const address = event?.account?.apartment?.address || event?.account?.apartment?.externalId || '';
+          const accountLabel = event.account.customLabel || [event.account.accountNumber, event.account.accountLabel].filter(Boolean).join(' ') || event.account.externalId;
+          const address = event.account.apartment.address || event.account.apartment.externalId;
 
           const message = formatMeterSubmissionMessage({
             periodLabel: event.periodLabel,
@@ -305,8 +324,9 @@ export class TelegramBotInteractionService implements OnModuleInit {
           if (chatId && messageId) {
             try {
               await ctx.telegram.editMessageText(chatId, messageId, undefined, message, { parse_mode: 'HTML', ...extra });
-            } catch (editError: any) {
-              this.logger.warn(`Failed to edit original message: ${editError.message}`);
+            } catch (editError: unknown) {
+              const editMsg = editError instanceof Error ? editError.message : String(editError);
+              this.logger.warn(`Failed to edit original message: ${editMsg}`);
             }
           }
 

@@ -6,9 +6,13 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { config } from './config';
 import { AppModule } from './app.module';
 import { printSwaggerUrl } from './common/utils/swagger';
+import { FileLogger } from './common/file-logger';
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create(AppModule);
+  const logger = new FileLogger('Watcher');
+  const app = await NestFactory.create(AppModule, {
+    logger,
+  });
   app.useGlobalPipes(new ValidationPipe({ transform: true, whitelist: true }));
 
   app.connectMicroservice<MicroserviceOptions>({
@@ -33,12 +37,13 @@ async function bootstrap(): Promise<void> {
 
   await app.startAllMicroservices();
   await app.listen(config.PORT);
-  console.log(`kvartplata-watcher listening on http://localhost:${config.PORT}`);
-  console.log('kvartplata-watcher RMQ microservice is listening...');
-  printSwaggerUrl();
+  logger.log(`kvartplata-watcher listening on http://localhost:${config.PORT}`);
+  logger.log('kvartplata-watcher RMQ microservice is listening...');
+  printSwaggerUrl((msg) => logger.log(msg));
 }
 
-bootstrap().catch((error) => {
-  console.error(error);
+bootstrap().catch((error: unknown) => {
+  const msg = error instanceof Error ? error.message : String(error);
+  console.error(msg);
   process.exit(1);
 });

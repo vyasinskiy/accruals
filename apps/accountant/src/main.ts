@@ -2,9 +2,13 @@ import { NestFactory } from '@nestjs/core';
 import { MicroserviceOptions, Transport } from '@nestjs/microservices';
 import { AppModule } from './app.module';
 import { config } from './common/config/config';
+import { FileLogger } from './common/file-logger';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const logger = new FileLogger('Accountant');
+  const app = await NestFactory.create(AppModule, {
+    logger,
+  });
 
   app.connectMicroservice<MicroserviceOptions>({
     transport: Transport.RMQ,
@@ -20,7 +24,7 @@ async function bootstrap() {
   await app.startAllMicroservices();
   await app.listen(config.PORT);
   
-  console.log(`Accountant HTTP API is listening on port ${config.PORT}`);
-  console.log('Accountant RMQ Microservice is listening...');
+  logger.log(`Accountant HTTP API is listening on port ${config.PORT}`);
+  logger.log('Accountant RMQ Microservice is listening...');
 }
 bootstrap();
