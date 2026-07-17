@@ -1,4 +1,4 @@
-import { Controller, Get, Query, Param, ParseIntPipe, NotFoundException, Res, Logger, Post, Body } from '@nestjs/common';
+import { Controller, Get, Query, Param, ParseIntPipe, NotFoundException, Res, Logger, Post, Body, Delete } from '@nestjs/common';
 import { EventPattern, Payload, MessagePattern } from '@nestjs/microservices';
 import { AccountantService } from './accountant.service';
 import { S3StorageService } from '../s3/s3-storage.service';
@@ -144,11 +144,82 @@ export class AccountantController {
     return this.accountantService.findApartmentById(id);
   }
 
+  @Get('invoices/:id')
+  async findInvoice(@Param('id', ParseIntPipe) id: number) {
+    return this.accountantService.findInvoiceById(id);
+  }
+
   @Get('invoices/upload-url')
   async getUploadUrl(@Query('accountExternalId') accountExternalId: string, @Query('periodLabel') periodLabel: string) {
     const key = this.s3Storage.buildInvoiceKey(accountExternalId, periodLabel);
     const url = this.s3Storage.getSignedUploadUrl(key);
     return { url, key };
+  }
+
+  @Get('payments')
+  async findPayments(@Query() query: { userId?: string; status?: string; userName?: string }) {
+    const userId = query.userId ? parseInt(query.userId, 10) : undefined;
+    return this.accountantService.findPayments({
+      userId: isNaN(Number(userId)) ? undefined : userId,
+      status: query.status,
+      userName: query.userName,
+    });
+  }
+
+  @Post('payments/confirm')
+  async confirmPaymentHttp(@Body() body: { paymentId: number; confirmedBy: number }) {
+    return this.accountantService.confirmPayment(body.paymentId, body.confirmedBy);
+  }
+
+  @Post('payments/reject')
+  async rejectPaymentHttp(@Body() body: { paymentId: number; confirmedBy: number; comment?: string }) {
+    return this.accountantService.rejectPayment(body.paymentId, body.confirmedBy, body.comment);
+  }
+
+  @Get('notifications')
+  async findNotifications(@Query() query: { accountId?: string; status?: string }) {
+    const accountId = query.accountId ? parseInt(query.accountId, 10) : undefined;
+    const meterEvents = await this.accountantService.findMeterSubmissionEvents({
+      accountId: isNaN(Number(accountId)) ? undefined : accountId,
+      status: query.status,
+    });
+    const systemEvents = await this.accountantService.findSystemEvents({
+      status: query.status,
+    });
+    return {
+      meterEvents,
+      systemEvents,
+    };
+  }
+
+  @Get('stats')
+  async getStatsHttp() {
+    return this.accountantService.getStats();
+  }
+
+  @Delete('apartments/:id')
+  async deleteApartment(@Param('id', ParseIntPipe) id: number) {
+    return this.accountantService.deleteApartment(id);
+  }
+
+  @Delete('accounts/:id')
+  async deleteAccount(@Param('id', ParseIntPipe) id: number) {
+    return this.accountantService.deleteAccount(id);
+  }
+
+  @Delete('invoices/:id')
+  async deleteInvoice(@Param('id', ParseIntPipe) id: number) {
+    return this.accountantService.deleteInvoice(id);
+  }
+
+  @Delete('payments/:id')
+  async deletePayment(@Param('id', ParseIntPipe) id: number) {
+    return this.accountantService.deletePayment(id);
+  }
+
+  @Delete('notifications/:id')
+  async deleteNotification(@Param('id', ParseIntPipe) id: number) {
+    return this.accountantService.deleteMeterSubmissionEvent(id);
   }
 }
 

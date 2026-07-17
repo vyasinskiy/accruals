@@ -1,3 +1,2 @@
-import { PrismaClient } from '../../apps/accountant/src/generated/client';
-
-export const prisma = new PrismaClient();
+// Unused. Admin UI communicates with microservices via HTTP REST API.
+export {};

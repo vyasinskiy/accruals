@@ -45,6 +45,20 @@ The system consists of three main services communicating via RabbitMQ:
 └── package.json         # Root workspace configuration
 ```
 
+## Ports Mapping
+
+Here is the network configuration and port assignments for all components of the system:
+
+| Service | Container Name | Internal Port | Host Port | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| **Admin UI** | `accruals-admin-ui` | 3000 | `3000` | Web administration dashboard (MUI) |
+| **Accountant Service** | `accruals-accountant` | 3005 | `3005` | Core HTTP REST API and microservice logic |
+| **Watcher Service** | `accruals-watcher` | 4500 | `4500` | Playwright scraping control interface |
+| **RabbitMQ** | `accruals-rabbitmq` | 5672, 15672 | `5672`, `15672` | AMQP broker & Management Console UI |
+| **PostgreSQL** | `accruals-postgres` | 5432 | `5432` | System databases (`accountant_db`, `watcher_db`, `telegram_bot_db`) |
+| **Visual Browser** | `accruals-visual-browser` | 3000 | `3002` | VNC-based Chromium display for scraper debugging |
+| **Telegram Bot** | `accruals-telegram-bot` | None | None | Long-running message daemon (no incoming TCP ports mapped) |
+
 ## Getting Started
 
 ### Prerequisites

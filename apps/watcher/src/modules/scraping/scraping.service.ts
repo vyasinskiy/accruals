@@ -334,7 +334,10 @@ export class ScrapingService implements OnApplicationBootstrap {
   }
 
   async getStatus() {
-    return [];
+    return this.prisma.run.findMany({
+      orderBy: { id: 'desc' },
+      take: 20,
+    });
   }
 
   private async finalize(runId: number, summary: ScanSummary): Promise<ScanSummary> {

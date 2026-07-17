@@ -117,9 +117,11 @@ services:
       - '3000:3000'
     env_file:
       - ${ADMIN_UI_PATH:-../apps/admin-ui}/.env
+      - ${TELEGRAM_BOT_PATH:-../apps/telegram-bot}/.env
     environment:
       RABBITMQ_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASS:-guest}@rabbitmq:5672
       PORT: 3000
+      ACCOUNTANT_API_URL: http://accountant:3005
     depends_on:
       rabbitmq:
         condition: service_started

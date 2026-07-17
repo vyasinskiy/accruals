@@ -1,0 +1,1 @@
+// Unused in Admin UI. Database access is delegated to microservices via HTTP REST API.

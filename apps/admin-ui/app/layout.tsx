@@ -1,7 +1,7 @@
-// app/layout.tsx
 import type { ReactNode } from 'react';
 import './globals.css';
-import styles from './layout.module.css';
+import MuiProvider from '../lib/mui-provider';
+import LayoutClient from './layout-client';
 
 export const metadata = {
   title: 'Accruals Admin',
@@ -17,8 +17,10 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           rel="stylesheet"
         />
       </head>
-      <body className={styles.body}>
-        {children}
+      <body>
+        <MuiProvider>
+          <LayoutClient>{children}</LayoutClient>
+        </MuiProvider>
       </body>
     </html>
   );

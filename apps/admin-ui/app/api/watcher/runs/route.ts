@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server';
-import { accountantClient } from '../../../../lib/accountant-client';
+import { watcherClient } from '../../../../lib/watcher-client';
 
 export async function GET() {
   try {
-    const { data } = await accountantClient.get('/stats');
+    const { data } = await watcherClient.get('/scraping/runs');
     return NextResponse.json(data);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown error';

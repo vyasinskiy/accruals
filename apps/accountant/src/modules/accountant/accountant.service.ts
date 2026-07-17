@@ -1,6 +1,7 @@
 import { Injectable, Logger, Inject, NotFoundException } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { Prisma } from '../../generated/client';
 import { S3StorageService } from '../s3/s3-storage.service';
 
 @Injectable()
@@ -602,6 +603,99 @@ export class AccountantService {
     const downloadUrl = storageKey && this.s3Storage.isEnabled() ? this.s3Storage.getSignedDownloadUrl(storageKey) : null;
 
     return this.serialize({ account, invoice, storageKey, downloadUrl });
+  }
+
+  async findPayments(filters: { userId?: number; status?: string; userName?: string } = {}) {
+    const where: Prisma.PaymentWhereInput = {};
+    if (filters.userId) {
+      where.userId = Number(filters.userId);
+    }
+    if (filters.status) {
+      where.status = filters.status;
+    }
+    if (filters.userName) {
+      where.userName = { contains: filters.userName, mode: 'insensitive' };
+    }
+    const results = await this.prisma.payment.findMany({
+      where,
+      include: {
+        user: true,
+      },
+      orderBy: [{ createdAt: 'desc' }],
+    });
+    return this.serialize(results);
+  }
+
+  async findMeterSubmissionEvents(filters: { accountId?: number; status?: string } = {}) {
+    const where: Prisma.MeterSubmissionEventWhereInput = {};
+    if (filters.accountId) {
+      where.accountId = Number(filters.accountId);
+    }
+    if (filters.status) {
+      where.status = filters.status;
+    }
+    const results = await this.prisma.meterSubmissionEvent.findMany({
+      where,
+      include: {
+        account: {
+          include: {
+            apartment: true,
+          },
+        },
+      },
+      orderBy: [{ targetDate: 'desc' }],
+    });
+    return this.serialize(results);
+  }
+
+  async findSystemEvents(filters: { status?: string; type?: string } = {}) {
+    const where: Prisma.EventWhereInput = {};
+    if (filters.status) {
+      where.status = filters.status;
+    }
+    if (filters.type) {
+      where.type = filters.type;
+    }
+    const results = await this.prisma.event.findMany({
+      where,
+      orderBy: [{ createdAt: 'desc' }],
+    });
+    return this.serialize(results);
+  }
+
+  async getStats() {
+    const totalPayments = await this.prisma.payment.count();
+    const pendingPayments = await this.prisma.payment.count({
+      where: { status: 'unconfirmed' },
+    });
+    const upcomingEvents = await this.prisma.meterSubmissionEvent.count({
+      where: { status: 'PENDING' },
+    });
+    return {
+      totalPayments,
+      pendingPayments,
+      upcomingEvents,
+    };
+  }
+
+  async deleteApartment(id: number) {
+    return this.prisma.apartment.delete({ where: { id } });
+  }
+
+  async deleteAccount(id: number) {
+    return this.prisma.account.delete({ where: { id } });
+  }
+
+  async deleteInvoice(id: number) {
+    return this.prisma.invoice.delete({ where: { id } });
+  }
+
+  async deletePayment(id: number) {
+    return this.prisma.payment.delete({ where: { id } });
+  }
+
+  async deleteMeterSubmissionEvent(id: number) {
+    return this.prisma.meterSubmissionEvent.delete({ where: { id } });
   }
 }
 
