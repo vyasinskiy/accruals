@@ -16,6 +16,7 @@ import TableRow from '@mui/material/TableRow';
 import Paper from '@mui/material/Paper';
 import CloseIcon from '@mui/icons-material/Close';
 import DeleteIcon from '@mui/icons-material/Delete';
+import AddIcon from '@mui/icons-material/Add';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
@@ -161,14 +162,27 @@ export default function AccountsPage() {
                     {row._count?.invoices ?? 0} шт.
                   </TableCell>
                   <TableCell style={{ textAlign: 'center' }}>
-                    <button
-                      className={styles.rejectBtn}
-                      style={{ padding: '6px 10px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
-                      onClick={(e) => handleDeleteClick(e, row.id)}
-                    >
-                      <DeleteIcon style={{ fontSize: '0.9rem' }} />
-                      Удалить
-                    </button>
+                    <div style={{ display: 'flex', justifyContent: 'center', gap: '6px' }}>
+                      <button
+                        className={styles.downloadLink}
+                        style={{ padding: '6px 10px', display: 'inline-flex', alignItems: 'center', gap: '4px', textDecoration: 'none', border: 'none', cursor: 'pointer', backgroundColor: '#4f46e5', color: '#fff' }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          router.push(`/invoices?create=true&accountId=${row.id}`);
+                        }}
+                      >
+                        <AddIcon style={{ fontSize: '0.9rem' }} />
+                        Выставить счет
+                      </button>
+                      <button
+                        className={styles.rejectBtn}
+                        style={{ padding: '6px 10px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                        onClick={(e) => handleDeleteClick(e, row.id)}
+                      >
+                        <DeleteIcon style={{ fontSize: '0.9rem' }} />
+                        Удалить
+                      </button>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))

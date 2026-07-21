@@ -1,9 +1,19 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { accountantClient } from '../../../lib/accountant-client';
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    const { data } = await accountantClient.get('/payments');
+    const { searchParams } = new URL(request.url);
+    const userId = searchParams.get('userId');
+    const status = searchParams.get('status');
+    const userName = searchParams.get('userName');
+
+    const params: Record<string, string> = {};
+    if (userId) params.userId = userId;
+    if (status) params.status = status;
+    if (userName) params.userName = userName;
+
+    const { data } = await accountantClient.get('/payments', { params });
     return NextResponse.json(data);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown error';

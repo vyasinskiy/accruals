@@ -2,6 +2,8 @@
 import * as React from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
+import useSWR from 'swr';
+import axios from 'axios';
 import styles from './layout.module.css';
 
 // MUI Icons
@@ -10,19 +12,26 @@ import BusinessIcon from '@mui/icons-material/Business';
 import AccountBalanceIcon from '@mui/icons-material/AccountBalance';
 import ReceiptIcon from '@mui/icons-material/Receipt';
 import PaymentIcon from '@mui/icons-material/Payment';
-import NotificationsIcon from '@mui/icons-material/Notifications';
+import EventIcon from '@mui/icons-material/Event';
 import LogoutIcon from '@mui/icons-material/Logout';
 import SyncIcon from '@mui/icons-material/Sync';
+import PeopleIcon from '@mui/icons-material/People';
 
 interface MenuItem {
   text: string;
   path: string;
   icon: React.ReactNode;
+  badge?: number;
 }
+
+const fetcher = (url: string) => axios.get(url).then(res => res.data);
 
 export default function LayoutClient({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
+
+  const { data: pendingData } = useSWR<{ count: number }>('/api/events/pending-count', fetcher, { refreshInterval: 10000 });
+  const pendingCount = pendingData?.count || 0;
 
   // If we are on the login page, don't show the sidebar and layout wrapper
   if (pathname === '/login') {
@@ -32,10 +41,11 @@ export default function LayoutClient({ children }: { children: React.ReactNode }
   const menuItems: MenuItem[] = [
     { text: 'Дашборд', path: '/', icon: <DashboardIcon className={styles.menuIcon} /> },
     { text: 'Квартиры', path: '/apartments', icon: <BusinessIcon className={styles.menuIcon} /> },
+    { text: 'Арендаторы', path: '/tenants', icon: <PeopleIcon className={styles.menuIcon} /> },
     { text: 'Лицевые счета', path: '/accounts', icon: <AccountBalanceIcon className={styles.menuIcon} /> },
     { text: 'Инвойсы', path: '/invoices', icon: <ReceiptIcon className={styles.menuIcon} /> },
     { text: 'Платежи', path: '/payments', icon: <PaymentIcon className={styles.menuIcon} /> },
-    { text: 'Уведомления', path: '/notifications', icon: <NotificationsIcon className={styles.menuIcon} /> },
+    { text: 'События', path: '/events', icon: <EventIcon className={styles.menuIcon} />, badge: pendingCount },
     { text: 'Сканирование', path: '/scanning', icon: <SyncIcon className={styles.menuIcon} /> },
   ];
 
@@ -73,7 +83,20 @@ export default function LayoutClient({ children }: { children: React.ReactNode }
                   className={`${styles.menuLink} ${isActive ? styles.activeMenuLink : ''}`}
                 >
                   {item.icon}
-                  <span>{item.text}</span>
+                  <span style={{ flex: 1 }}>{item.text}</span>
+                  {Boolean(item.badge && item.badge > 0) && (
+                    <span style={{
+                      backgroundColor: '#ef4444',
+                      color: '#fff',
+                      borderRadius: '10px',
+                      padding: '2px 8px',
+                      fontSize: '0.75rem',
+                      fontWeight: 700,
+                      lineHeight: 1
+                    }}>
+                      {item.badge}
+                    </span>
+                  )}
                 </Link>
               </div>
             );

@@ -19,6 +19,7 @@ model Apartment {
   lastSeenAt    DateTime  @map("last_seen_at")
   accounts      Account[]
   tenants       Tenant[]
+  scheduledEvents ScheduledEvent[]
 
   @@index([address], map: "idx_apartments_address")
   @@index([organization], map: "idx_apartments_organization")
@@ -48,6 +49,7 @@ model Tenant {
 
   user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   apartment       Apartment? @relation(fields: [apartmentId], references: [id], onDelete: Cascade)
+  scheduledEvents ScheduledEvent[]
 
   @@map("tenants")
 }
@@ -68,6 +70,7 @@ model Account {
   accruals            Accrual[]
   invoices            Invoice[]
   meterEvents         MeterSubmissionEvent[]
+  scheduledEvents     ScheduledEvent[]
 
   @@index([accountNumber], map: "idx_accounts_number")
   @@map("accounts")
@@ -161,4 +164,45 @@ model Event {
   status    String   @default("pending")
   details   String?
   createdAt DateTime @default(now())
+}
+
+model ScheduledEvent {
+  id              Int            @id @default(autoincrement())
+  title           String
+  description     String?
+  targetType      String         @default("general") @map("target_type") // general, account, tenant, apartment
+  accountId       Int?           @map("account_id")
+  tenantId        Int?           @map("tenant_id")
+  apartmentId     Int?           @map("apartment_id")
+  frequency       String         @default("monthly") // monthly, quarterly
+  dayOfMonth      Int            @default(20) @map("day_of_month")
+  timeOfDay       String         @default("10:00") @map("time_of_day")
+  sendTelegram    Boolean        @default(true) @map("send_telegram")
+  telegramTemplate String?       @map("telegram_template")
+  active          Boolean        @default(true)
+  createdAt       DateTime       @default(now()) @map("created_at")
+  updatedAt       DateTime       @updatedAt @map("updated_at")
+
+  account         Account?       @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  tenant          Tenant?        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  apartment       Apartment?     @relation(fields: [apartmentId], references: [id], onDelete: Cascade)
+  triggers        EventTrigger[]
+
+  @@map("scheduled_events")
+}
+
+model EventTrigger {
+  id               Int            @id @default(autoincrement())
+  scheduledEventId Int            @map("scheduled_event_id")
+  triggerDate      DateTime       @map("trigger_date")
+  status           String         @default("pending") // pending, processed, skipped
+  comment          String?
+  processedAt      DateTime?      @map("processed_at")
+  sentTelegramAt   DateTime?      @map("sent_telegram_at")
+  createdAt        DateTime       @default(now()) @map("created_at")
+  updatedAt        DateTime       @updatedAt @map("updated_at")
+
+  scheduledEvent   ScheduledEvent @relation(fields: [scheduledEventId], references: [id], onDelete: Cascade)
+
+  @@map("event_triggers")
 }

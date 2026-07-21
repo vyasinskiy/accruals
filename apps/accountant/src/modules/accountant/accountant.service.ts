@@ -1,5 +1,6 @@
 import { Injectable, Logger, Inject, NotFoundException } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { Prisma } from '../../generated/client';
 import { S3StorageService } from '../s3/s3-storage.service';
@@ -537,7 +538,12 @@ export class AccountantService {
   async findApartmentById(id: number) {
     const apartment = await this.prisma.apartment.findUnique({
       where: { id },
-      include: { accounts: true },
+      include: { 
+        accounts: true,
+        tenants: {
+          include: { user: true }
+        }
+      },
     });
     return this.serialize(apartment);
   }
@@ -573,9 +579,52 @@ export class AccountantService {
 
     const parsedRaw = safeJsonParse<Record<string, unknown>>(invoice.rawJson);
     const storageKey = parsedRaw?.s3Key as string || (isS3Key(invoice.localFilePath) ? invoice.localFilePath : null);
-    const downloadUrl = storageKey && this.s3Storage.isEnabled() ? this.s3Storage.getSignedDownloadUrl(storageKey) : null;
+    
+    let downloadUrl: string | null = null;
+    if (storageKey && this.s3Storage.isEnabled()) {
+      downloadUrl = this.s3Storage.getSignedDownloadUrl(storageKey);
+    } else if (invoice.invoiceUrl) {
+      downloadUrl = invoice.invoiceUrl;
+    }
 
     return this.serialize({ invoice, storageKey, downloadUrl });
+  }
+
+  async createManualInvoice(data: { accountId: number; period: string; amount: number; comment: string }) {
+    const account = await this.prisma.account.findUnique({
+      where: { id: Number(data.accountId) },
+      include: { apartment: true }
+    });
+    if (!account) {
+      throw new NotFoundException(`Account ${data.accountId} not found`);
+    }
+
+    const periodClean = (data.period || '').replace('-', '').trim();
+    const uniquePeriodId = `manual-${periodClean}-${Date.now()}`;
+
+    const invoice = await this.prisma.invoice.create({
+      data: {
+        accountId: account.id,
+        accountExternalId: account.externalId,
+        periodId: uniquePeriodId,
+        periodLabel: periodClean,
+        amount: data.amount,
+        available: true,
+        uploadedToS3: false,
+        firstSeenAt: new Date(),
+        lastSeenAt: new Date(),
+        rawJson: JSON.stringify({
+          manual: true,
+          comment: data.comment,
+          amount: data.amount,
+          periodId: periodClean,
+          accountId: account.externalId
+        })
+      },
+      include: { account: { include: { apartment: true } } }
+    });
+
+    return this.serialize(invoice);
   }
 
   async findInvoiceByPeriod(accountExternalId: string, period: string) {
@@ -696,6 +745,356 @@ export class AccountantService {
 
   async deleteMeterSubmissionEvent(id: number) {
     return this.prisma.meterSubmissionEvent.delete({ where: { id } });
+  }
+
+  async findTenants() {
+    const results = await this.prisma.tenant.findMany({
+      include: {
+        user: true,
+        apartment: true,
+      },
+      orderBy: { id: 'desc' },
+    });
+    return this.serialize(results);
+  }
+
+  async createTenant(data: { name: string; apartmentId?: number; rentPaymentDay?: number; rentAmount?: number }) {
+    const user = await this.prisma.user.create({
+      data: {
+        name: data.name,
+        role: 'tenant',
+      }
+    });
+
+    const tenant = await this.prisma.tenant.create({
+      data: {
+        userId: user.id,
+        apartmentId: data.apartmentId || null,
+        rentPaymentDay: data.rentPaymentDay || null,
+        rentAmount: data.rentAmount || null,
+        status: 'active',
+      },
+      include: { user: true, apartment: true }
+    });
+
+    return this.serialize(tenant);
+  }
+
+  async updateTenant(id: number, data: { name?: string; apartmentId?: number | null; rentPaymentDay?: number | null; rentAmount?: number | null; status?: string }) {
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id },
+      include: { user: true }
+    });
+    if (!tenant) throw new NotFoundException(`Tenant with ID ${id} not found`);
+
+    if (data.name) {
+      await this.prisma.user.update({
+        where: { id: tenant.userId },
+        data: { name: data.name }
+      });
+    }
+
+    const updated = await this.prisma.tenant.update({
+      where: { id },
+      data: {
+        apartmentId: data.apartmentId === undefined ? tenant.apartmentId : data.apartmentId,
+        rentPaymentDay: data.rentPaymentDay === undefined ? tenant.rentPaymentDay : data.rentPaymentDay,
+        rentAmount: data.rentAmount === undefined ? tenant.rentAmount : data.rentAmount,
+        status: data.status === undefined ? tenant.status : data.status,
+      },
+      include: { user: true, apartment: true }
+    });
+
+    return this.serialize(updated);
+  }
+
+  async deleteTenant(id: number) {
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id }
+    });
+    if (!tenant) throw new NotFoundException(`Tenant with ID ${id} not found`);
+    return this.prisma.user.delete({
+      where: { id: tenant.userId }
+    });
+  }
+
+  async findTenantById(id: number) {
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id },
+      include: {
+        user: true,
+        apartment: {
+          include: {
+            accounts: true
+          }
+        }
+      }
+    });
+    if (!tenant) throw new NotFoundException(`Tenant with ID ${id} not found`);
+    return this.serialize(tenant);
+  }
+
+  // --- SCHEDULED EVENTS ENGINE ---
+
+  @Cron(CronExpression.EVERY_MINUTE)
+  async handleScheduledEventsCheck() {
+    const now = new Date();
+    try {
+      const dueTriggers = await this.prisma.eventTrigger.findMany({
+        where: {
+          sentTelegramAt: null,
+          triggerDate: { lte: now },
+          scheduledEvent: {
+            sendTelegram: true,
+            active: true
+          }
+        },
+        include: {
+          scheduledEvent: true
+        }
+      });
+
+      if (dueTriggers.length === 0) return;
+
+      this.logger.log(`Found ${dueTriggers.length} scheduled event trigger(s) due for Telegram notification`);
+
+      for (const trigger of dueTriggers) {
+        const event = trigger.scheduledEvent;
+        try {
+          this.notificationsClient.emit('scheduled_event_triggered', {
+            eventId: event.id,
+            triggerId: trigger.id,
+            title: event.title,
+            description: event.description,
+            targetType: event.targetType,
+            frequency: event.frequency,
+            dayOfMonth: event.dayOfMonth,
+            timeOfDay: event.timeOfDay,
+            telegramTemplate: event.telegramTemplate,
+            createdAt: event.createdAt
+          });
+
+          await this.prisma.eventTrigger.update({
+            where: { id: trigger.id },
+            data: { sentTelegramAt: now }
+          });
+
+          this.logger.log(`Emitted scheduled_event_triggered for trigger #${trigger.id} (event #${event.id})`);
+        } catch (err: unknown) {
+          this.logger.error(`Failed to emit scheduled_event_triggered for trigger #${trigger.id}`, err);
+        }
+      }
+    } catch (err: unknown) {
+      this.logger.error('Error checking scheduled event triggers', err);
+    }
+  }
+
+  async findScheduledEvents() {
+    const events = await this.prisma.scheduledEvent.findMany({
+      include: {
+        account: { include: { apartment: true } },
+        tenant: { include: { user: true, apartment: true } },
+        apartment: true,
+        triggers: {
+          orderBy: { triggerDate: 'desc' }
+        }
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+    return this.serialize(events);
+  }
+
+  async findScheduledEventById(id: number) {
+    const event = await this.prisma.scheduledEvent.findUnique({
+      where: { id: Number(id) },
+      include: {
+        account: { include: { apartment: true } },
+        tenant: { include: { user: true, apartment: true } },
+        apartment: true,
+        triggers: {
+          orderBy: { triggerDate: 'desc' }
+        }
+      }
+    });
+    if (!event) {
+      throw new NotFoundException(`Scheduled event #${id} not found`);
+    }
+    return this.serialize(event);
+  }
+
+  async createScheduledEvent(data: {
+    title: string;
+    description?: string;
+    targetType: string;
+    accountId?: number;
+    tenantId?: number;
+    apartmentId?: number;
+    frequency?: string;
+    dayOfMonth?: number;
+    timeOfDay?: string;
+    sendTelegram?: boolean;
+    telegramTemplate?: string;
+  }) {
+    const day = Math.min(Math.max(Number(data.dayOfMonth) || 20, 1), 31);
+    const freq = data.frequency || 'monthly';
+    const stepMonths = freq === 'quarterly' ? 3 : 1;
+    const timeOfDayStr = data.timeOfDay?.trim() || '10:00';
+
+    const event = await this.prisma.scheduledEvent.create({
+      data: {
+        title: data.title.trim(),
+        description: data.description?.trim() || null,
+        targetType: data.targetType || 'general',
+        accountId: data.accountId ? Number(data.accountId) : null,
+        tenantId: data.tenantId ? Number(data.tenantId) : null,
+        apartmentId: data.apartmentId ? Number(data.apartmentId) : null,
+        frequency: freq,
+        dayOfMonth: day,
+        timeOfDay: timeOfDayStr,
+        sendTelegram: data.sendTelegram ?? true,
+        telegramTemplate: data.telegramTemplate?.trim() || null,
+        active: true
+      }
+    });
+
+    // Parse UTC hours and minutes
+    const [rawH, rawM] = timeOfDayStr.split(':').map(Number);
+    const hours = isNaN(rawH) ? 10 : rawH;
+    const minutes = isNaN(rawM) ? 0 : rawM;
+
+    // Generate initial triggers starting from current month (i = 0) to next 5 periods
+    const now = new Date();
+    const triggersData: Array<{ scheduledEventId: number; triggerDate: Date; status: string }> = [];
+
+    for (let i = 0; i <= 5; i++) {
+      const targetMonthOffset = i * stepMonths;
+      const targetYear = now.getFullYear();
+      const targetMonth = now.getMonth() + targetMonthOffset;
+      const d = new Date(Date.UTC(targetYear, targetMonth, day, hours, minutes, 0));
+
+      triggersData.push({
+        scheduledEventId: event.id,
+        triggerDate: d,
+        status: 'pending'
+      });
+    }
+
+    await this.prisma.eventTrigger.createMany({
+      data: triggersData
+    });
+
+    return this.findScheduledEventById(event.id);
+  }
+
+  async updateScheduledEvent(id: number, data: {
+    title?: string;
+    description?: string;
+    targetType?: string;
+    accountId?: number;
+    tenantId?: number;
+    apartmentId?: number;
+    frequency?: string;
+    dayOfMonth?: number;
+    timeOfDay?: string;
+    sendTelegram?: boolean;
+    telegramTemplate?: string;
+    active?: boolean;
+  }) {
+    const existing = await this.prisma.scheduledEvent.findUnique({ where: { id: Number(id) } });
+    if (!existing) throw new NotFoundException(`Scheduled event #${id} not found`);
+
+    const updated = await this.prisma.scheduledEvent.update({
+      where: { id: Number(id) },
+      data: {
+        ...(data.title ? { title: data.title.trim() } : {}),
+        ...(data.description !== undefined ? { description: data.description?.trim() || null } : {}),
+        ...(data.targetType ? { targetType: data.targetType } : {}),
+        ...(data.accountId !== undefined ? { accountId: data.accountId ? Number(data.accountId) : null } : {}),
+        ...(data.tenantId !== undefined ? { tenantId: data.tenantId ? Number(data.tenantId) : null } : {}),
+        ...(data.apartmentId !== undefined ? { apartmentId: data.apartmentId ? Number(data.apartmentId) : null } : {}),
+        ...(data.frequency ? { frequency: data.frequency } : {}),
+        ...(data.dayOfMonth ? { dayOfMonth: Number(data.dayOfMonth) } : {}),
+        ...(data.timeOfDay ? { timeOfDay: data.timeOfDay.trim() } : {}),
+        ...(data.sendTelegram !== undefined ? { sendTelegram: Boolean(data.sendTelegram) } : {}),
+        ...(data.telegramTemplate !== undefined ? { telegramTemplate: data.telegramTemplate?.trim() || null } : {}),
+        ...(data.active !== undefined ? { active: Boolean(data.active) } : {})
+      }
+    });
+
+    // Recalculate pending triggers with updated schedule parameters
+    await this.prisma.eventTrigger.deleteMany({
+      where: {
+        scheduledEventId: updated.id,
+        status: 'pending'
+      }
+    });
+
+    const day = Math.min(Math.max(Number(updated.dayOfMonth) || 20, 1), 31);
+    const freq = updated.frequency || 'monthly';
+    const stepMonths = freq === 'quarterly' ? 3 : 1;
+    const timeOfDayStr = updated.timeOfDay || '10:00';
+
+    const [rawH, rawM] = timeOfDayStr.split(':').map(Number);
+    const hours = isNaN(rawH) ? 10 : rawH;
+    const minutes = isNaN(rawM) ? 0 : rawM;
+
+    const now = new Date();
+    const triggersData: Array<{ scheduledEventId: number; triggerDate: Date; status: string }> = [];
+
+    for (let i = 0; i <= 5; i++) {
+      const targetMonthOffset = i * stepMonths;
+      const targetYear = now.getFullYear();
+      const targetMonth = now.getMonth() + targetMonthOffset;
+      const d = new Date(Date.UTC(targetYear, targetMonth, day, hours, minutes, 0));
+
+      triggersData.push({
+        scheduledEventId: updated.id,
+        triggerDate: d,
+        status: 'pending'
+      });
+    }
+
+    await this.prisma.eventTrigger.createMany({
+      data: triggersData
+    });
+
+    return this.findScheduledEventById(id);
+  }
+
+  async deleteScheduledEvent(id: number) {
+    const existing = await this.prisma.scheduledEvent.findUnique({ where: { id: Number(id) } });
+    if (!existing) throw new NotFoundException(`Scheduled event #${id} not found`);
+
+    await this.prisma.scheduledEvent.delete({ where: { id: Number(id) } });
+    return { success: true, message: `Event #${id} deleted` };
+  }
+
+  async updateEventTrigger(triggerId: number, data: { status?: string; comment?: string }) {
+    const trigger = await this.prisma.eventTrigger.findUnique({ where: { id: Number(triggerId) } });
+    if (!trigger) throw new NotFoundException(`Event trigger #${triggerId} not found`);
+
+    const updated = await this.prisma.eventTrigger.update({
+      where: { id: Number(triggerId) },
+      data: {
+        ...(data.status ? { status: data.status, processedAt: data.status === 'processed' ? new Date() : trigger.processedAt } : {}),
+        ...(data.comment !== undefined ? { comment: data.comment } : {})
+      },
+      include: { scheduledEvent: true }
+    });
+
+    return this.serialize(updated);
+  }
+
+  async getPendingTriggersCount() {
+    const count = await this.prisma.eventTrigger.count({
+      where: {
+        status: 'pending',
+        triggerDate: {
+          lte: new Date()
+        }
+      }
+    });
+    return { count };
   }
 }
 

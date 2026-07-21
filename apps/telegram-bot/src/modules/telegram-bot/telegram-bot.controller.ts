@@ -435,6 +435,41 @@ export class TelegramBotController {
     await this.notifyAdmins(message, `scan_completed (status: ${data.status})`);
   }
 
+  @EventPattern('scheduled_event_triggered')
+  async handleScheduledEventTriggered(@Payload() data: {
+    eventId: number;
+    title: string;
+    description?: string;
+    targetType: string;
+    frequency?: string;
+    dayOfMonth?: number;
+    telegramTemplate?: string;
+  }) {
+    this.logger.log(`Received scheduled_event_triggered for event #${data.eventId}: ${data.title}`);
+
+    const freqText = data.frequency === 'quarterly' ? 'Каждые 3 месяца' : 'Каждый месяц';
+    const dayText = data.dayOfMonth ? `${data.dayOfMonth}-го числа` : '';
+
+    let message = '';
+    if (data.telegramTemplate && data.telegramTemplate.trim()) {
+      message = data.telegramTemplate
+        .replace(/\{title\}/g, data.title || '')
+        .replace(/\{description\}/g, data.description || '')
+        .replace(/\{frequency\}/g, freqText)
+        .replace(/\{dayOfMonth\}/g, dayText)
+        .replace(/\{targetType\}/g, data.targetType || '');
+    } else {
+      message = `📅 <b>Запланированное событие!</b>\n\n` +
+        `📌 <b>${data.title}</b>\n` +
+        `${data.description ? `📝 ${data.description}\n` : ''}` +
+        `🔄 Периодичность: ${freqText} ${dayText}\n` +
+        `🎯 Объект: ${data.targetType}\n\n` +
+        `⚡ Пожалуйста, проверьте статус события в панели управления!`;
+    }
+
+    await this.notifyAdmins(message, `scheduled_event_triggered (#${data.eventId})`);
+  }
+
   private async notifyAdmins(
     message: string,
     actionName: string,

@@ -1,6 +1,7 @@
 'use client';
 import * as React from 'react';
 import { useState, useMemo } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import useSWR from 'swr';
 import axios from 'axios';
 import styles from '../shared-table.module.css';
@@ -43,7 +44,9 @@ interface Payment {
 const fetcher = (url: string) => axios.get(url).then(res => res.data);
 
 export default function PaymentsPage() {
-  const { data: payments, error, mutate, isLoading } = useSWR<Payment[]>('/api/payments', fetcher);
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const userIdParam = searchParams.get('userId');
   const [search, setSearch] = useState('');
   const [deleteId, setDeleteId] = useState<number | null>(null);
   
@@ -51,6 +54,12 @@ export default function PaymentsPage() {
   const [selectedReceipt, setSelectedReceipt] = useState<string | null>(null);
   const [rejectPaymentId, setRejectPaymentId] = useState<number | null>(null);
   const [rejectComment, setRejectComment] = useState('');
+
+  const apiUrl = userIdParam
+    ? `/api/payments?userId=${userIdParam}`
+    : '/api/payments';
+
+  const { data: payments, error, mutate, isLoading } = useSWR<Payment[]>(apiUrl, fetcher);
 
   const filteredPayments = useMemo(() => {
     if (!payments) return [];
@@ -164,6 +173,16 @@ export default function PaymentsPage() {
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
+
+        {userIdParam && (
+          <div className={styles.activeFilterBadge}>
+            <span>Показаны платежи пользователя #{userIdParam}</span>
+            <button className={styles.clearFilterBtn} onClick={() => router.push('/payments')} title="Сбросить фильтр">
+              <CloseIcon style={{ fontSize: '1rem' }} />
+            </button>
+          </div>
+        )}
+
         <div>
           Найдено платежей: {filteredPayments.length}
         </div>

@@ -1,4 +1,4 @@
-import { Controller, Get, Query, Param, ParseIntPipe, NotFoundException, Res, Logger, Post, Body, Delete } from '@nestjs/common';
+import { Controller, Get, Query, Param, ParseIntPipe, NotFoundException, Res, Logger, Post, Body, Delete, Put } from '@nestjs/common';
 import { EventPattern, Payload, MessagePattern } from '@nestjs/microservices';
 import { AccountantService } from './accountant.service';
 import { S3StorageService } from '../s3/s3-storage.service';
@@ -149,6 +149,11 @@ export class AccountantController {
     return this.accountantService.findInvoiceById(id);
   }
 
+  @Post('invoices')
+  async createManualInvoice(@Body() body: { accountId: number; period: string; amount: number; comment: string }) {
+    return this.accountantService.createManualInvoice(body);
+  }
+
   @Get('invoices/upload-url')
   async getUploadUrl(@Query('accountExternalId') accountExternalId: string, @Query('periodLabel') periodLabel: string) {
     const key = this.s3Storage.buildInvoiceKey(accountExternalId, periodLabel);
@@ -220,6 +225,68 @@ export class AccountantController {
   @Delete('notifications/:id')
   async deleteNotification(@Param('id', ParseIntPipe) id: number) {
     return this.accountantService.deleteMeterSubmissionEvent(id);
+  }
+
+  @Get('tenants')
+  async getTenants() {
+    return this.accountantService.findTenants();
+  }
+
+  @Post('tenants')
+  async createTenant(@Body() body: { name: string; apartmentId?: number; rentPaymentDay?: number; rentAmount?: number }) {
+    return this.accountantService.createTenant(body);
+  }
+
+  @Put('tenants/:id')
+  async updateTenant(@Param('id', ParseIntPipe) id: number, @Body() body: { name?: string; apartmentId?: number | null; rentPaymentDay?: number | null; rentAmount?: number | null; status?: string }) {
+    return this.accountantService.updateTenant(id, body);
+  }
+
+  @Delete('tenants/:id')
+  async deleteTenant(@Param('id', ParseIntPipe) id: number) {
+    return this.accountantService.deleteTenant(id);
+  }
+
+  @Get('tenants/:id')
+  async getTenantById(@Param('id', ParseIntPipe) id: number) {
+    return this.accountantService.findTenantById(id);
+  }
+
+  // --- SCHEDULED EVENTS ENDPOINTS ---
+
+  @Get('events')
+  async getScheduledEvents() {
+    return this.accountantService.findScheduledEvents();
+  }
+
+  @Get('events/pending-count')
+  async getPendingTriggersCount() {
+    return this.accountantService.getPendingTriggersCount();
+  }
+
+  @Get('events/:id')
+  async getScheduledEventById(@Param('id', ParseIntPipe) id: number) {
+    return this.accountantService.findScheduledEventById(id);
+  }
+
+  @Post('events')
+  async createScheduledEvent(@Body() body: any) {
+    return this.accountantService.createScheduledEvent(body);
+  }
+
+  @Put('events/:id')
+  async updateScheduledEvent(@Param('id', ParseIntPipe) id: number, @Body() body: any) {
+    return this.accountantService.updateScheduledEvent(id, body);
+  }
+
+  @Delete('events/:id')
+  async deleteScheduledEvent(@Param('id', ParseIntPipe) id: number) {
+    return this.accountantService.deleteScheduledEvent(id);
+  }
+
+  @Put('events/triggers/:triggerId')
+  async updateEventTrigger(@Param('triggerId', ParseIntPipe) triggerId: number, @Body() body: { status?: string; comment?: string }) {
+    return this.accountantService.updateEventTrigger(triggerId, body);
   }
 }
 
