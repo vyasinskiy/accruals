@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import useSWR from 'swr';
 import axios from 'axios';
 import styles from '../../shared-table.module.css';
-import { utcTimeToLocal } from '../../../lib/time-utils';
+import { formatFrequencyLabel, utcTimeToLocal } from '../../../lib/time-utils';
 import CreateEditEventModal from '../../../components/CreateEditEventModal';
 
 // MUI Components
@@ -43,7 +43,8 @@ interface ScheduledEventDetail {
   accountId?: number | null;
   tenantId?: number | null;
   apartmentId?: number | null;
-  frequency: 'monthly' | 'quarterly';
+  frequency: 'daily' | 'weekly' | 'monthly' | 'quarterly';
+  reminderFrequency?: 'weekly' | 'daily' | 'none';
   dayOfMonth: number;
   timeOfDay?: string;
   sendTelegram: boolean;
@@ -180,7 +181,7 @@ export default function EventDetailPage({ params }: { params: { id: string } }) 
           <div>
             <span style={{ fontSize: '0.8rem', color: '#64748b', fontWeight: 600, textTransform: 'uppercase' }}>Периодичность</span>
             <div style={{ fontSize: '1.05rem', fontWeight: 700, color: '#0f172a', marginTop: '4px' }}>
-              {event.frequency === 'quarterly' ? 'Каждые 3 месяца' : 'Каждый месяц'} ({event.dayOfMonth}-го числа в {utcTimeToLocal(event.timeOfDay)})
+              {formatFrequencyLabel(event.frequency, event.dayOfMonth, event.timeOfDay)}
             </div>
           </div>
 

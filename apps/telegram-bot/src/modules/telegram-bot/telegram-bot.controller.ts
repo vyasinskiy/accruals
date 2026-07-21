@@ -444,11 +444,18 @@ export class TelegramBotController {
     frequency?: string;
     dayOfMonth?: number;
     telegramTemplate?: string;
+    isReminder?: boolean;
   }) {
-    this.logger.log(`Received scheduled_event_triggered for event #${data.eventId}: ${data.title}`);
+    this.logger.log(`Received scheduled_event_triggered for event #${data.eventId}: ${data.title} (isReminder=${data.isReminder})`);
 
-    const freqText = data.frequency === 'quarterly' ? 'Каждые 3 месяца' : 'Каждый месяц';
-    const dayText = data.dayOfMonth ? `${data.dayOfMonth}-го числа` : '';
+    let freqText = 'Каждый месяц';
+    if (data.frequency === 'daily') freqText = 'Каждый день';
+    else if (data.frequency === 'weekly') freqText = 'Каждую неделю';
+    else if (data.frequency === 'quarterly') freqText = 'Каждые 3 месяца';
+
+    const dayText = (data.frequency === 'daily' || data.frequency === 'weekly')
+      ? ''
+      : (data.dayOfMonth ? `${data.dayOfMonth}-го числа` : '');
 
     let targetLabel = data.targetType;
     if (data.targetType === 'account') targetLabel = 'Лицевой счет';
@@ -460,7 +467,11 @@ export class TelegramBotController {
       ? `💬 <b>Сообщение:</b> ${data.telegramTemplate.trim()}\n`
       : '';
 
-    const message = `📅 <b>Запланированное событие!</b>\n\n` +
+    const header = data.isReminder
+      ? `⚠️ <b>Напоминание о пропущенном событии!</b>`
+      : `📅 <b>Запланированное событие!</b>`;
+
+    const message = `${header}\n\n` +
       `📌 <b>${data.title}</b>\n` +
       `${data.description ? `📝 ${data.description}\n` : ''}` +
       `🔄 Периодичность: ${freqText} ${dayText}\n` +

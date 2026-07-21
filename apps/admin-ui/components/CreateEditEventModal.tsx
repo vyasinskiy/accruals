@@ -42,7 +42,11 @@ export interface EventToEditItem {
   accountId?: number | null;
   tenantId?: number | null;
   apartmentId?: number | null;
-  frequency: 'monthly' | 'quarterly';
+  frequency: 'daily' | 'weekly' | 'monthly' | 'quarterly';
+  reminderFrequency?: 'daily' | 'weekly' | 'monthly' | 'none';
+  reminderDayOfWeek?: number | null;
+  reminderDayOfMonth?: number | null;
+  reminderTimeOfDay?: string | null;
   dayOfMonth: number;
   timeOfDay?: string;
   sendTelegram: boolean;
@@ -74,7 +78,11 @@ export default React.memo(function CreateEditEventModal({
   const [accountId, setAccountId] = useState('');
   const [tenantId, setTenantId] = useState('');
   const [apartmentId, setApartmentId] = useState('');
-  const [frequency, setFrequency] = useState<'monthly' | 'quarterly'>('monthly');
+  const [frequency, setFrequency] = useState<'daily' | 'weekly' | 'monthly' | 'quarterly'>('monthly');
+  const [reminderFrequency, setReminderFrequency] = useState<'daily' | 'weekly' | 'monthly' | 'none'>('weekly');
+  const [reminderDayOfWeek, setReminderDayOfWeek] = useState<number>(1);
+  const [reminderDayOfMonth, setReminderDayOfMonth] = useState<number>(20);
+  const [reminderTimeOfDay, setReminderTimeOfDay] = useState<string>('10:00');
   const [dayOfMonth, setDayOfMonth] = useState<number>(20);
   const [timeOfDay, setTimeOfDay] = useState<string>('10:00');
   const [sendTelegram, setSendTelegram] = useState(true);
@@ -91,6 +99,10 @@ export default React.memo(function CreateEditEventModal({
         setTenantId(eventToEdit.tenantId ? String(eventToEdit.tenantId) : (tenants && tenants.length > 0 ? String(tenants[0].id) : ''));
         setApartmentId(eventToEdit.apartmentId ? String(eventToEdit.apartmentId) : (apartments && apartments.length > 0 ? String(apartments[0].id) : ''));
         setFrequency(eventToEdit.frequency || 'monthly');
+        setReminderFrequency(eventToEdit.reminderFrequency || 'weekly');
+        setReminderDayOfWeek(eventToEdit.reminderDayOfWeek || 1);
+        setReminderDayOfMonth(eventToEdit.reminderDayOfMonth || 20);
+        setReminderTimeOfDay(utcTimeToLocal(eventToEdit.reminderTimeOfDay || eventToEdit.timeOfDay));
         setDayOfMonth(eventToEdit.dayOfMonth || 20);
         setTimeOfDay(utcTimeToLocal(eventToEdit.timeOfDay));
         setSendTelegram(eventToEdit.sendTelegram ?? true);
@@ -103,6 +115,10 @@ export default React.memo(function CreateEditEventModal({
         setTenantId(tenants && tenants.length > 0 ? String(tenants[0].id) : '');
         setApartmentId(apartments && apartments.length > 0 ? String(apartments[0].id) : '');
         setFrequency('monthly');
+        setReminderFrequency('weekly');
+        setReminderDayOfWeek(1);
+        setReminderDayOfMonth(20);
+        setReminderTimeOfDay('10:00');
         setDayOfMonth(20);
         setTimeOfDay('10:00');
         setSendTelegram(true);
@@ -127,6 +143,10 @@ export default React.memo(function CreateEditEventModal({
         tenantId: targetType === 'tenant' ? Number(tenantId) : null,
         apartmentId: targetType === 'apartment' ? Number(apartmentId) : null,
         frequency,
+        reminderFrequency,
+        reminderDayOfWeek: Number(reminderDayOfWeek),
+        reminderDayOfMonth: Number(reminderDayOfMonth),
+        reminderTimeOfDay: localTimeToUtc(reminderTimeOfDay),
         dayOfMonth: Number(dayOfMonth),
         timeOfDay: localTimeToUtc(timeOfDay),
         sendTelegram,
@@ -270,23 +290,33 @@ export default React.memo(function CreateEditEventModal({
                 className={styles.searchInput}
                 style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
               >
+                <option value="daily">Каждый день</option>
+                <option value="weekly">Каждую неделю</option>
                 <option value="monthly">Каждый месяц</option>
                 <option value="quarterly">Каждые 3 месяца</option>
               </select>
             </div>
 
             <div>
-              <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 600, marginBottom: '6px', color: '#334155' }}>
+              <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 600, marginBottom: '6px', color: (frequency === 'daily' || frequency === 'weekly') ? '#94a3b8' : '#334155' }}>
                 День месяца (1-31):
               </label>
               <input
                 type="number"
                 min="1"
                 max="31"
+                disabled={frequency === 'daily' || frequency === 'weekly'}
                 value={dayOfMonth}
                 onChange={(e) => setDayOfMonth(Number(e.target.value))}
                 className={styles.searchInput}
-                style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                style={{
+                  width: '100%',
+                  padding: '10px 12px',
+                  borderRadius: '6px',
+                  border: '1px solid #cbd5e1',
+                  backgroundColor: (frequency === 'daily' || frequency === 'weekly') ? '#f1f5f9' : '#fff',
+                  cursor: (frequency === 'daily' || frequency === 'weekly') ? 'not-allowed' : 'text'
+                }}
               />
             </div>
 
@@ -301,6 +331,85 @@ export default React.memo(function CreateEditEventModal({
                 className={styles.searchInput}
                 style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
               />
+            </div>
+          </div>
+
+          <div style={{ padding: '14px', backgroundColor: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <span style={{ fontWeight: 700, fontSize: '0.9rem', color: '#0f172a' }}>
+              🔔 Повторные напоминания (если событие пропущено и не обработано)
+            </span>
+
+            <div style={{ display: 'grid', gridTemplateColumns: reminderFrequency === 'none' ? '1fr' : (reminderFrequency === 'daily' ? '1fr 1fr' : '1fr 1fr 1fr'), gap: '12px' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '4px', color: '#334155' }}>
+                  Периодичность:
+                </label>
+                <select
+                  value={reminderFrequency}
+                  onChange={(e) => setReminderFrequency(e.target.value as any)}
+                  className={styles.searchInput}
+                  style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.875rem' }}
+                >
+                  <option value="weekly">Раз в неделю (по умолчанию)</option>
+                  <option value="daily">Раз в день</option>
+                  <option value="monthly">Раз в месяц</option>
+                  <option value="none">Не напоминать повторно</option>
+                </select>
+              </div>
+
+              {reminderFrequency === 'weekly' && (
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '4px', color: '#334155' }}>
+                    День недели:
+                  </label>
+                  <select
+                    value={reminderDayOfWeek}
+                    onChange={(e) => setReminderDayOfWeek(Number(e.target.value))}
+                    className={styles.searchInput}
+                    style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.875rem' }}
+                  >
+                    <option value={1}>Понедельник</option>
+                    <option value={2}>Вторник</option>
+                    <option value={3}>Среда</option>
+                    <option value={4}>Четверг</option>
+                    <option value={5}>Пятница</option>
+                    <option value={6}>Суббота</option>
+                    <option value={7}>Воскресенье</option>
+                  </select>
+                </div>
+              )}
+
+              {reminderFrequency === 'monthly' && (
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '4px', color: '#334155' }}>
+                    День месяца (1-31):
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="31"
+                    value={reminderDayOfMonth}
+                    onChange={(e) => setReminderDayOfMonth(Number(e.target.value))}
+                    className={styles.searchInput}
+                    style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.875rem' }}
+                  />
+                </div>
+              )}
+
+              {reminderFrequency !== 'none' && (
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '4px', color: '#334155' }}>
+                    Время напоминания:
+                  </label>
+                  <input
+                    type="time"
+                    value={reminderTimeOfDay}
+                    onChange={(e) => setReminderTimeOfDay(e.target.value)}
+                    className={styles.searchInput}
+                    style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.875rem' }}
+                  />
+                </div>
+              )}
             </div>
           </div>
 

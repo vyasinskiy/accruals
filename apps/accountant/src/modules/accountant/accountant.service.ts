@@ -840,9 +840,9 @@ export class AccountantService {
   async handleScheduledEventsCheck() {
     const now = new Date();
     try {
-      const dueTriggers = await this.prisma.eventTrigger.findMany({
+      const pendingTriggers = await this.prisma.eventTrigger.findMany({
         where: {
-          sentTelegramAt: null,
+          status: 'pending',
           triggerDate: { lte: now },
           scheduledEvent: {
             sendTelegram: true,
@@ -854,34 +854,57 @@ export class AccountantService {
         }
       });
 
-      if (dueTriggers.length === 0) return;
+      if (pendingTriggers.length === 0) return;
 
-      this.logger.log(`Found ${dueTriggers.length} scheduled event trigger(s) due for Telegram notification`);
-
-      for (const trigger of dueTriggers) {
+      for (const trigger of pendingTriggers) {
         const event = trigger.scheduledEvent;
-        try {
-          this.notificationsClient.emit('scheduled_event_triggered', {
-            eventId: event.id,
-            triggerId: trigger.id,
-            title: event.title,
-            description: event.description,
-            targetType: event.targetType,
-            frequency: event.frequency,
-            dayOfMonth: event.dayOfMonth,
-            timeOfDay: event.timeOfDay,
-            telegramTemplate: event.telegramTemplate,
-            createdAt: event.createdAt
-          });
+        if (!event) continue;
 
-          await this.prisma.eventTrigger.update({
-            where: { id: trigger.id },
-            data: { sentTelegramAt: now }
-          });
+        const reminderFreq = event.reminderFrequency || 'weekly';
+        let shouldSend = false;
+        let isReminder = false;
 
-          this.logger.log(`Emitted scheduled_event_triggered for trigger #${trigger.id} (event #${event.id})`);
-        } catch (err: unknown) {
-          this.logger.error(`Failed to emit scheduled_event_triggered for trigger #${trigger.id}`, err);
+        if (!trigger.sentTelegramAt) {
+          shouldSend = true;
+          isReminder = false;
+        } else if (reminderFreq !== 'none') {
+          const diffMs = now.getTime() - new Date(trigger.sentTelegramAt).getTime();
+          const dayMs = 24 * 60 * 60 * 1000;
+          if (reminderFreq === 'daily' && diffMs >= dayMs) {
+            shouldSend = true;
+            isReminder = true;
+          } else if (reminderFreq === 'weekly' && diffMs >= 7 * dayMs) {
+            shouldSend = true;
+            isReminder = true;
+          }
+        }
+
+        if (shouldSend) {
+          try {
+            this.notificationsClient.emit('scheduled_event_triggered', {
+              eventId: event.id,
+              triggerId: trigger.id,
+              title: event.title,
+              description: event.description,
+              targetType: event.targetType,
+              frequency: event.frequency,
+              reminderFrequency: event.reminderFrequency,
+              dayOfMonth: event.dayOfMonth,
+              timeOfDay: event.timeOfDay,
+              telegramTemplate: event.telegramTemplate,
+              createdAt: event.createdAt,
+              isReminder
+            });
+
+            await this.prisma.eventTrigger.update({
+              where: { id: trigger.id },
+              data: { sentTelegramAt: now }
+            });
+
+            this.logger.log(`Emitted scheduled_event_triggered for trigger #${trigger.id} (event #${event.id}, isReminder=${isReminder})`);
+          } catch (err: unknown) {
+            this.logger.error(`Failed to emit scheduled_event_triggered for trigger #${trigger.id}`, err);
+          }
         }
       }
     } catch (err: unknown) {
@@ -901,7 +924,7 @@ export class AccountantService {
       },
       orderBy: { createdAt: 'desc' }
     });
-    return this.serialize(events);
+    return events;
   }
 
   async findScheduledEventById(id: number) {
@@ -919,17 +942,18 @@ export class AccountantService {
     if (!event) {
       throw new NotFoundException(`Scheduled event #${id} not found`);
     }
-    return this.serialize(event);
+    return event;
   }
 
   async createScheduledEvent(data: {
     title: string;
     description?: string;
-    targetType: string;
+    targetType?: string;
     accountId?: number;
     tenantId?: number;
     apartmentId?: number;
     frequency?: string;
+    reminderFrequency?: string;
     dayOfMonth?: number;
     timeOfDay?: string;
     sendTelegram?: boolean;
@@ -937,7 +961,7 @@ export class AccountantService {
   }) {
     const day = Math.min(Math.max(Number(data.dayOfMonth) || 20, 1), 31);
     const freq = data.frequency || 'monthly';
-    const stepMonths = freq === 'quarterly' ? 3 : 1;
+    const reminderFreq = data.reminderFrequency || 'weekly';
     const timeOfDayStr = data.timeOfDay?.trim() || '10:00';
 
     const event = await this.prisma.scheduledEvent.create({
@@ -949,6 +973,7 @@ export class AccountantService {
         tenantId: data.tenantId ? Number(data.tenantId) : null,
         apartmentId: data.apartmentId ? Number(data.apartmentId) : null,
         frequency: freq,
+        reminderFrequency: reminderFreq,
         dayOfMonth: day,
         timeOfDay: timeOfDayStr,
         sendTelegram: data.sendTelegram ?? true,
@@ -957,27 +982,12 @@ export class AccountantService {
       }
     });
 
-    // Parse UTC hours and minutes
-    const [rawH, rawM] = timeOfDayStr.split(':').map(Number);
-    const hours = isNaN(rawH) ? 10 : rawH;
-    const minutes = isNaN(rawM) ? 0 : rawM;
-
-    // Generate initial triggers starting from current month (i = 0) to next 5 periods
-    const now = new Date();
-    const triggersData: Array<{ scheduledEventId: number; triggerDate: Date; status: string }> = [];
-
-    for (let i = 0; i <= 5; i++) {
-      const targetMonthOffset = i * stepMonths;
-      const targetYear = now.getFullYear();
-      const targetMonth = now.getMonth() + targetMonthOffset;
-      const d = new Date(Date.UTC(targetYear, targetMonth, day, hours, minutes, 0));
-
-      triggersData.push({
-        scheduledEventId: event.id,
-        triggerDate: d,
-        status: 'pending'
-      });
-    }
+    const triggersData = this.buildTriggersForEvent({
+      id: event.id,
+      frequency: event.frequency,
+      dayOfMonth: event.dayOfMonth,
+      timeOfDay: event.timeOfDay
+    });
 
     await this.prisma.eventTrigger.createMany({
       data: triggersData
@@ -994,6 +1004,7 @@ export class AccountantService {
     tenantId?: number;
     apartmentId?: number;
     frequency?: string;
+    reminderFrequency?: string;
     dayOfMonth?: number;
     timeOfDay?: string;
     sendTelegram?: boolean;
@@ -1013,6 +1024,7 @@ export class AccountantService {
         ...(data.tenantId !== undefined ? { tenantId: data.tenantId ? Number(data.tenantId) : null } : {}),
         ...(data.apartmentId !== undefined ? { apartmentId: data.apartmentId ? Number(data.apartmentId) : null } : {}),
         ...(data.frequency ? { frequency: data.frequency } : {}),
+        ...(data.reminderFrequency ? { reminderFrequency: data.reminderFrequency } : {}),
         ...(data.dayOfMonth ? { dayOfMonth: Number(data.dayOfMonth) } : {}),
         ...(data.timeOfDay ? { timeOfDay: data.timeOfDay.trim() } : {}),
         ...(data.sendTelegram !== undefined ? { sendTelegram: Boolean(data.sendTelegram) } : {}),
@@ -1029,10 +1041,24 @@ export class AccountantService {
       }
     });
 
-    const day = Math.min(Math.max(Number(updated.dayOfMonth) || 20, 1), 31);
-    const freq = updated.frequency || 'monthly';
-    const stepMonths = freq === 'quarterly' ? 3 : 1;
-    const timeOfDayStr = updated.timeOfDay || '10:00';
+    const triggersData = this.buildTriggersForEvent({
+      id: updated.id,
+      frequency: updated.frequency,
+      dayOfMonth: updated.dayOfMonth,
+      timeOfDay: updated.timeOfDay
+    });
+
+    await this.prisma.eventTrigger.createMany({
+      data: triggersData
+    });
+
+    return this.findScheduledEventById(id);
+  }
+
+  private buildTriggersForEvent(event: { id: number; frequency: string; dayOfMonth: number; timeOfDay: string }) {
+    const freq = event.frequency || 'monthly';
+    const day = Math.min(Math.max(Number(event.dayOfMonth) || 20, 1), 31);
+    const timeOfDayStr = event.timeOfDay || '10:00';
 
     const [rawH, rawM] = timeOfDayStr.split(':').map(Number);
     const hours = isNaN(rawH) ? 10 : rawH;
@@ -1041,24 +1067,41 @@ export class AccountantService {
     const now = new Date();
     const triggersData: Array<{ scheduledEventId: number; triggerDate: Date; status: string }> = [];
 
-    for (let i = 0; i <= 5; i++) {
-      const targetMonthOffset = i * stepMonths;
-      const targetYear = now.getFullYear();
-      const targetMonth = now.getMonth() + targetMonthOffset;
-      const d = new Date(Date.UTC(targetYear, targetMonth, day, hours, minutes, 0));
+    if (freq === 'daily') {
+      for (let i = 0; i <= 13; i++) {
+        const d = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate() + i, hours, minutes, 0));
+        triggersData.push({
+          scheduledEventId: event.id,
+          triggerDate: d,
+          status: 'pending'
+        });
+      }
+    } else if (freq === 'weekly') {
+      for (let i = 0; i <= 7; i++) {
+        const d = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate() + (i * 7), hours, minutes, 0));
+        triggersData.push({
+          scheduledEventId: event.id,
+          triggerDate: d,
+          status: 'pending'
+        });
+      }
+    } else {
+      const stepMonths = freq === 'quarterly' ? 3 : 1;
+      for (let i = 0; i <= 5; i++) {
+        const targetMonthOffset = i * stepMonths;
+        const targetYear = now.getFullYear();
+        const targetMonth = now.getMonth() + targetMonthOffset;
+        const d = new Date(Date.UTC(targetYear, targetMonth, day, hours, minutes, 0));
 
-      triggersData.push({
-        scheduledEventId: updated.id,
-        triggerDate: d,
-        status: 'pending'
-      });
+        triggersData.push({
+          scheduledEventId: event.id,
+          triggerDate: d,
+          status: 'pending'
+        });
+      }
     }
 
-    await this.prisma.eventTrigger.createMany({
-      data: triggersData
-    });
-
-    return this.findScheduledEventById(id);
+    return triggersData;
   }
 
   async deleteScheduledEvent(id: number) {

@@ -174,9 +174,13 @@ model ScheduledEvent {
   accountId       Int?           @map("account_id")
   tenantId        Int?           @map("tenant_id")
   apartmentId     Int?           @map("apartment_id")
-  frequency       String         @default("monthly") // monthly, quarterly
-  dayOfMonth      Int            @default(20) @map("day_of_month")
-  timeOfDay       String         @default("10:00") @map("time_of_day")
+  frequency          String         @default("monthly") // 'daily' | 'weekly' | 'monthly' | 'quarterly'
+  reminderFrequency  String         @default("weekly") @map("reminder_frequency") // 'daily' | 'weekly' | 'monthly' | 'none'
+  reminderDayOfWeek  Int?           @default(1) @map("reminder_day_of_week") // 1..7 (1=Mon ... 7=Sun)
+  reminderDayOfMonth Int?          @default(20) @map("reminder_day_of_month") // 1..31
+  reminderTimeOfDay  String?        @default("10:00") @map("reminder_time_of_day")
+  dayOfMonth         Int            @default(20) @map("day_of_month")
+  timeOfDay          String         @default("10:00") @map("time_of_day")
   sendTelegram    Boolean        @default(true) @map("send_telegram")
   telegramTemplate String?       @map("telegram_template")
   active          Boolean        @default(true)

@@ -27,3 +27,20 @@ export function utcTimeToLocal(utcTimeStr: string | null | undefined): string {
   const localM = String(date.getMinutes()).padStart(2, '0');
   return `${localH}:${localM}`;
 }
+
+/**
+ * Formats frequency, day of month, and UTC time of day into a human readable Russian string.
+ */
+export function formatFrequencyLabel(frequency?: string, dayOfMonth?: number, timeOfDay?: string): string {
+  const localTime = utcTimeToLocal(timeOfDay);
+  if (frequency === 'daily') {
+    return `Каждый день в ${localTime}`;
+  }
+  if (frequency === 'weekly') {
+    return `Каждую неделю в ${localTime}`;
+  }
+  if (frequency === 'quarterly') {
+    return `Каждые 3 месяца (${dayOfMonth || 20}-го числа в ${localTime})`;
+  }
+  return `Каждый месяц (${dayOfMonth || 20}-го числа в ${localTime})`;
+}

@@ -26,7 +26,7 @@ import DialogContent from '@mui/material/DialogContent';
 import DialogContentText from '@mui/material/DialogContentText';
 import DialogActions from '@mui/material/DialogActions';
 import Button from '@mui/material/Button';
-import { utcTimeToLocal } from '../../lib/time-utils';
+import { formatFrequencyLabel, utcTimeToLocal } from '../../lib/time-utils';
 
 interface ScheduledEventItem {
   id: number;
@@ -36,7 +36,8 @@ interface ScheduledEventItem {
   accountId?: number | null;
   tenantId?: number | null;
   apartmentId?: number | null;
-  frequency: 'monthly' | 'quarterly';
+  frequency: 'daily' | 'weekly' | 'monthly' | 'quarterly';
+  reminderFrequency?: 'weekly' | 'daily' | 'none';
   dayOfMonth: number;
   timeOfDay?: string;
   sendTelegram: boolean;
@@ -182,7 +183,7 @@ export default function EventsPage() {
                     </TableCell>
                     <TableCell>{renderTargetLabel(row)}</TableCell>
                     <TableCell style={{ fontWeight: 600, color: '#334155' }}>
-                      {row.frequency === 'quarterly' ? 'Каждые 3 месяца' : 'Каждый месяц'} ({row.dayOfMonth}-го числа в {utcTimeToLocal(row.timeOfDay)})
+                      {formatFrequencyLabel(row.frequency, row.dayOfMonth, row.timeOfDay)}
                     </TableCell>
                     <TableCell>
                       {row.sendTelegram ? (
