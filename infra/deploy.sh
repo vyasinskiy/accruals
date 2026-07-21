@@ -53,7 +53,17 @@ if [ $COUNT -eq $MAX_RETRIES ]; then
     error_exit "PostgreSQL is not ready after 30 seconds."
 fi
 
-# 5. Start application services
+# 5. Create database backup with date and time
+BACKUP_DIR="backups"
+mkdir -p "${BACKUP_DIR}"
+TIMESTAMP=$(date +"%Y-%m-%d_%H-%M-%S")
+BACKUP_FILE="${BACKUP_DIR}/db_backup_${TIMESTAMP}.sql.gz"
+
+echo "💾 Creating database backup (${BACKUP_FILE})..."
+docker exec accruals-postgres pg_dumpall -U ${POSTGRES_USER:-postgres} | gzip > "${BACKUP_FILE}"
+echo "✅ Database backup created successfully!"
+
+# 6. Start application services
 # Migrations are handled internally by each service on startup
 echo "🚀 Starting application services..."
 WATCHER_PATH=$WATCHER_PATH ACCOUNTANT_PATH=$ACCOUNTANT_PATH TELEGRAM_BOT_PATH=$TELEGRAM_BOT_PATH docker compose up -d
