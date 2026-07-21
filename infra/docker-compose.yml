@@ -127,6 +127,8 @@ services:
         condition: service_started
       accountant:
         condition: service_started
+    networks:
+      - accruals-network
   telegram-bot:
     image: accruals-telegram-bot:latest
     build:

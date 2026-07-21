@@ -66,6 +66,6 @@ echo "✅ Database backup created successfully!"
 # 6. Start application services
 # Migrations are handled internally by each service on startup
 echo "🚀 Starting application services..."
-WATCHER_PATH=$WATCHER_PATH ACCOUNTANT_PATH=$ACCOUNTANT_PATH TELEGRAM_BOT_PATH=$TELEGRAM_BOT_PATH docker compose up -d
+WATCHER_PATH=$WATCHER_PATH ACCOUNTANT_PATH=$ACCOUNTANT_PATH TELEGRAM_BOT_PATH=$TELEGRAM_BOT_PATH ADMIN_UI_PATH=$ADMIN_UI_PATH docker compose up -d
 
 echo "✅ System is up and running!"
