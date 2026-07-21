@@ -27,6 +27,11 @@ export interface MyContext extends Context {
       apartmentId?: number;
       rentPaymentDay?: number;
     };
+    attachPhotoData?: {
+      fileId?: string;
+      filterType?: 'tenant' | 'apartment' | 'account' | 'all';
+      selectedEntityId?: number;
+    };
     eventId?: number;
     messageId?: number;
     chatId?: number;
@@ -83,6 +88,13 @@ export class TelegramBotInteractionService implements OnModuleInit {
     this.bot.on('text', (ctx, next) => this.handleTextMessage(ctx, next));
     this.bot.on('photo', (ctx) => this.handlePhotoMessage(ctx));
     this.bot.action('skip_receipt_photo', (ctx) => this.handleSkipReceiptPhotoAction(ctx));
+    this.bot.action('attach_photo_start', (ctx) => this.handleAttachPhotoStart(ctx));
+    this.bot.action('attach_photo_cancel', (ctx) => this.handleAttachPhotoCancel(ctx));
+    this.bot.action(/attach_filter_(tenant|apartment|account|all)/, (ctx) => this.handleAttachFilterSelect(ctx));
+    this.bot.action(/attach_sel_tenant_(\d+)/, (ctx) => this.handleAttachSelectEntity(ctx, 'tenant'));
+    this.bot.action(/attach_sel_apt_(\d+)/, (ctx) => this.handleAttachSelectEntity(ctx, 'apartment'));
+    this.bot.action(/attach_sel_acc_(\d+)/, (ctx) => this.handleAttachSelectEntity(ctx, 'account'));
+    this.bot.action(/attach_sel_evt_(\d+)/, (ctx) => this.handleAttachSelectEvent(ctx));
 
     // Handle channel posts for commands manually
     this.bot.on('channel_post', async (ctx, next) => {
@@ -572,6 +584,28 @@ export class TelegramBotInteractionService implements OnModuleInit {
         this.logger.error(`Failed to create payment: ${errorMsg}`);
         await ctx.reply('Произошла ошибка при сохранении данных.');
       }
+      return;
+    }
+
+    // Photo received outside payment flow -> Offer attaching to an event
+    const message = ctx.message as any;
+    if (message?.photo && message.photo.length > 0) {
+      const photo = message.photo[message.photo.length - 1];
+      ctx.session = ctx.session || {};
+      ctx.session.attachPhotoData = {
+        fileId: photo.file_id
+      };
+
+      await ctx.reply(
+        '📸 <b>Получено изображение!</b>\nВыберите действие с этим файлом:',
+        {
+          parse_mode: 'HTML',
+          ...Markup.inlineKeyboard([
+            [Markup.button.callback('📌 Прикрепить к событию', 'attach_photo_start')],
+            [Markup.button.callback('❌ Отмена', 'attach_photo_cancel')]
+          ])
+        }
+      );
     }
   }
 
@@ -613,4 +647,221 @@ export class TelegramBotInteractionService implements OnModuleInit {
       await ctx.answerCbQuery('Действие недействительно');
     }
   }
+
+  private async handleAttachPhotoCancel(ctx: any) {
+    if (ctx.session?.attachPhotoData) {
+      ctx.session.attachPhotoData = undefined;
+    }
+    await ctx.answerCbQuery();
+    await ctx.editMessageText('❌ Действие отменено.');
+  }
+
+  private async handleAttachPhotoStart(ctx: any) {
+    await ctx.answerCbQuery();
+    await ctx.editMessageText(
+      '🔍 <b>Выберите фильтр для поиска события:</b>',
+      {
+        parse_mode: 'HTML',
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback('👤 По арендатору', 'attach_filter_tenant')],
+          [Markup.button.callback('🏢 По квартире', 'attach_filter_apartment')],
+          [Markup.button.callback('📑 По лицевому счету', 'attach_filter_account')],
+          [Markup.button.callback('🌐 Все активные события', 'attach_filter_all')],
+          [Markup.button.callback('❌ Отмена', 'attach_photo_cancel')]
+        ])
+      }
+    );
+  }
+
+  private async handleAttachFilterSelect(ctx: any) {
+    const filterType = ctx.match[1] as 'tenant' | 'apartment' | 'account' | 'all';
+    await ctx.answerCbQuery();
+
+    if (filterType === 'all') {
+      try {
+        const events = await firstValueFrom(
+          this.accountantClient.send<any[]>('get_scheduled_events_filtered', { activeOnly: true })
+        );
+        if (!events || events.length === 0) {
+          return ctx.editMessageText('⚠️ Активных событий не найдено.', Markup.inlineKeyboard([
+            [Markup.button.callback('🔙 Назад к фильтрам', 'attach_photo_start')]
+          ]));
+        }
+        const buttons = events.map(evt => [
+          Markup.button.callback(`📅 ${evt.title}`, `attach_sel_evt_${evt.id}`)
+        ]);
+        buttons.push([Markup.button.callback('🔙 Назад к фильтрам', 'attach_photo_start')]);
+        return ctx.editMessageText('📋 <b>Выберите событие:</b>', {
+          parse_mode: 'HTML',
+          ...Markup.inlineKeyboard(buttons)
+        });
+      } catch (e) {
+        this.logger.error('Failed to fetch all events', e);
+        return ctx.editMessageText('❌ Ошибка при получении событий.');
+      }
+    }
+
+    if (filterType === 'tenant') {
+      try {
+        const tenants = await firstValueFrom(
+          this.accountantClient.send<any[]>('get_all_tenants', {})
+        );
+        if (!tenants || tenants.length === 0) {
+          return ctx.editMessageText('⚠️ Арендаторы не найдены.', Markup.inlineKeyboard([
+            [Markup.button.callback('🔙 Назад', 'attach_photo_start')]
+          ]));
+        }
+        const buttons = tenants.map(t => [
+          Markup.button.callback(`👤 ${t.user?.name || `Арендатор #${t.id}`} ${t.apartment?.address ? `(${t.apartment.address})` : ''}`, `attach_sel_tenant_${t.id}`)
+        ]);
+        buttons.push([Markup.button.callback('🔙 Назад', 'attach_photo_start')]);
+        return ctx.editMessageText('👤 <b>Выберите арендатора:</b>', {
+          parse_mode: 'HTML',
+          ...Markup.inlineKeyboard(buttons)
+        });
+      } catch (e) {
+        this.logger.error('Failed to fetch tenants', e);
+        return ctx.editMessageText('❌ Ошибка при получении списка арендаторов.');
+      }
+    }
+
+    if (filterType === 'apartment') {
+      try {
+        const apartments = await firstValueFrom(
+          this.accountantClient.send<any[]>('get_apartments', {})
+        );
+        if (!apartments || apartments.length === 0) {
+          return ctx.editMessageText('⚠️ Квартиры не найдены.', Markup.inlineKeyboard([
+            [Markup.button.callback('🔙 Назад', 'attach_photo_start')]
+          ]));
+        }
+        const buttons = apartments.map(apt => [
+          Markup.button.callback(`🏢 ${apt.address || apt.externalId}`, `attach_sel_apt_${apt.id}`)
+        ]);
+        buttons.push([Markup.button.callback('🔙 Назад', 'attach_photo_start')]);
+        return ctx.editMessageText('🏢 <b>Выберите квартиру:</b>', {
+          parse_mode: 'HTML',
+          ...Markup.inlineKeyboard(buttons)
+        });
+      } catch (e) {
+        this.logger.error('Failed to fetch apartments', e);
+        return ctx.editMessageText('❌ Ошибка при получении списка квартир.');
+      }
+    }
+
+    if (filterType === 'account') {
+      try {
+        const apartments = await firstValueFrom(
+          this.accountantClient.send<any[]>('get_apartments', {})
+        );
+        const buttons: any[] = [];
+        for (const apt of apartments || []) {
+          for (const acc of apt.accounts || []) {
+            const label = acc.customLabel || [acc.accountNumber, acc.accountLabel].filter(Boolean).join(' ') || acc.externalId;
+            buttons.push([
+              Markup.button.callback(`📑 Счёт: ${label} (${apt.address || ''})`, `attach_sel_acc_${acc.id}`)
+            ]);
+          }
+        }
+        if (buttons.length === 0) {
+          return ctx.editMessageText('⚠️ Лицевые счета не найдены.', Markup.inlineKeyboard([
+            [Markup.button.callback('🔙 Назад', 'attach_photo_start')]
+          ]));
+        }
+        buttons.push([Markup.button.callback('🔙 Назад', 'attach_photo_start')]);
+        return ctx.editMessageText('📑 <b>Выберите лицевой счет:</b>', {
+          parse_mode: 'HTML',
+          ...Markup.inlineKeyboard(buttons)
+        });
+      } catch (e) {
+        this.logger.error('Failed to fetch accounts', e);
+        return ctx.editMessageText('❌ Ошибка при получении списка счетов.');
+      }
+    }
+  }
+
+  private async handleAttachSelectEntity(ctx: any, type: 'tenant' | 'apartment' | 'account') {
+    const entityId = parseInt(ctx.match[1]);
+    await ctx.answerCbQuery();
+
+    const filters: any = { activeOnly: true };
+    if (type === 'tenant') filters.tenantId = entityId;
+    if (type === 'apartment') filters.apartmentId = entityId;
+    if (type === 'account') filters.accountId = entityId;
+
+    try {
+      const events = await firstValueFrom(
+        this.accountantClient.send<any[]>('get_scheduled_events_filtered', filters)
+      );
+
+      if (!events || events.length === 0) {
+        return ctx.editMessageText('⚠️ Для выбранного объекта не найдено активных событий.', Markup.inlineKeyboard([
+          [Markup.button.callback('🔙 Назад к фильтрам', 'attach_photo_start')]
+        ]));
+      }
+
+      const buttons = events.map(evt => [
+        Markup.button.callback(`📅 ${evt.title}`, `attach_sel_evt_${evt.id}`)
+      ]);
+      buttons.push([Markup.button.callback('🔙 Назад к фильтрам', 'attach_photo_start')]);
+
+      return ctx.editMessageText('📋 <b>Выберите событие для прикрепления файла:</b>', {
+        parse_mode: 'HTML',
+        ...Markup.inlineKeyboard(buttons)
+      });
+    } catch (e) {
+      this.logger.error(`Failed to fetch events for ${type} #${entityId}`, e);
+      return ctx.editMessageText('❌ Ошибка при получении событий.');
+    }
+  }
+
+  private async handleAttachSelectEvent(ctx: any) {
+    const eventId = parseInt(ctx.match[1]);
+    const fileId = ctx.session?.attachPhotoData?.fileId;
+
+    if (!fileId) {
+      await ctx.answerCbQuery('Изображение не найдено в сессии.', { show_alert: true });
+      return ctx.editMessageText('❌ Ошибка сессии: фотография не найдена.');
+    }
+
+    await ctx.answerCbQuery('Загрузка файла и прикрепление...');
+    await ctx.editMessageText('⏳ <b>Загрузка фотографии в S3...</b>', { parse_mode: 'HTML' });
+
+    try {
+      // 1. Get file link from Telegram
+      const fileLink = await ctx.telegram.getFileLink(fileId);
+      const fileRes = await fetch(fileLink.href);
+      if (!fileRes.ok) {
+        throw new Error(`Failed to download file from Telegram: ${fileRes.statusText}`);
+      }
+      const arrayBuffer = await fileRes.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
+      const fileBufferBase64 = buffer.toString('base64');
+
+      // 2. Attach document via accountant microservice
+      const result = await firstValueFrom(
+        this.accountantClient.send<any>('attach_event_document', {
+          scheduledEventId: eventId,
+          fileName: `photo_${Date.now()}.jpg`,
+          fileBufferBase64,
+          mimeType: 'image/jpeg',
+          telegramFileId: fileId,
+          uploadedBy: ctx.from?.username || ctx.from?.first_name || 'telegram-admin'
+        })
+      );
+
+      ctx.session.attachPhotoData = undefined;
+
+      const successMsg = `✅ <b>Документ успешно прикреплен к событию!</b>\n\n` +
+        `📁 Имя файла: <code>${result.fileName}</code>\n` +
+        `☁️ Загружено в S3 storage\n` +
+        `Файл доступен в панели администратора на странице события.`;
+
+      await ctx.editMessageText(successMsg, { parse_mode: 'HTML' });
+    } catch (e: any) {
+      this.logger.error(`Failed to attach document to event #${eventId}`, e);
+      await ctx.editMessageText(`❌ Ошибка при загрузке и прикреплении документа: ${e.message || String(e)}`);
+    }
+  }
 }
+

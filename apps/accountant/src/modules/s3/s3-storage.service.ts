@@ -24,13 +24,51 @@ export class S3StorageService {
     return prefix ? `${prefix}/${filename}` : filename;
   }
 
+  buildAttachmentKey(eventId: number, fileName: string): string {
+    const timestamp = Date.now();
+    const extension = fileName.includes('.') ? fileName.slice(fileName.lastIndexOf('.')).toLowerCase() : '.jpg';
+    const baseName = slug(fileName.replace(/\.[^/.]+$/, '')) || 'document';
+    const path = `events/${eventId}/attachments/${timestamp}-${baseName}${extension}`;
+    const prefix = config.S3_PREFIX.trim().replace(/^\/+|\/+$/g, '');
+    return prefix ? `${prefix}/${path}` : path;
+  }
+
   getSignedDownloadUrl(key: string, ttlSeconds = config.S3_SIGNED_URL_TTL): string {
+    if (!this.isEnabled()) {
+      return '';
+    }
     return this.getSignedUrl('GET', key, ttlSeconds);
   }
 
   getSignedUploadUrl(key: string, ttlSeconds = 600): string {
-    return this.getSignedUrl('PUT', key, ttlSeconds, 'application/pdf');
+    return this.getSignedUrl('PUT', key, ttlSeconds, 'application/octet-stream');
   }
+
+  async uploadBuffer(key: string, buffer: Buffer, contentType = 'application/octet-stream'): Promise<string> {
+    if (this.isEnabled()) {
+      const uploadUrl = this.getSignedUploadUrl(key);
+      const res = await fetch(uploadUrl, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': contentType
+        },
+        body: new Uint8Array(buffer)
+      });
+      if (!res.ok) {
+        throw new Error(`Failed to upload buffer to S3: ${res.statusText} (${res.status})`);
+      }
+      return key;
+    }
+    // Fallback if S3 is not configured: save locally
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const localDir = path.join(process.cwd(), 'data', 'uploads');
+    const fullPath = path.join(localDir, key);
+    fs.mkdirSync(path.dirname(fullPath), { recursive: true });
+    fs.writeFileSync(fullPath, buffer);
+    return key;
+  }
+
 
   private getSignedUrl(method: 'GET' | 'PUT', key: string, ttlSeconds: number, contentType?: string): string {
     if (!this.isEnabled()) {

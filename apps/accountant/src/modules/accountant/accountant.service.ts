@@ -920,11 +920,21 @@ export class AccountantService {
         apartment: true,
         triggers: {
           orderBy: { triggerDate: 'desc' }
+        },
+        attachments: {
+          orderBy: { createdAt: 'desc' }
         }
       },
       orderBy: { createdAt: 'desc' }
     });
-    return events;
+
+    return events.map((event: any) => ({
+      ...this.serialize(event),
+      attachments: (event.attachments || []).map((att: any) => ({
+        ...this.serialize(att),
+        downloadUrl: this.s3Storage.getSignedDownloadUrl(att.s3Key) || `/api/events/attachments/${att.id}/download`
+      }))
+    }));
   }
 
   async findScheduledEventById(id: number) {
@@ -936,13 +946,23 @@ export class AccountantService {
         apartment: true,
         triggers: {
           orderBy: { triggerDate: 'desc' }
+        },
+        attachments: {
+          orderBy: { createdAt: 'desc' }
         }
       }
     });
     if (!event) {
       throw new NotFoundException(`Scheduled event #${id} not found`);
     }
-    return event;
+
+    return {
+      ...this.serialize(event),
+      attachments: (event.attachments || []).map((att: any) => ({
+        ...this.serialize(att),
+        downloadUrl: this.s3Storage.getSignedDownloadUrl(att.s3Key) || `/api/events/attachments/${att.id}/download`
+      }))
+    };
   }
 
   async createScheduledEvent(data: {
@@ -1139,7 +1159,109 @@ export class AccountantService {
     });
     return { count };
   }
+
+  async attachEventDocument(data: {
+    scheduledEventId?: number;
+    eventTriggerId?: number;
+    fileName: string;
+    fileBuffer: Buffer;
+    mimeType?: string;
+    telegramFileId?: string;
+    uploadedBy?: string;
+  }) {
+    let scheduledEventId = data.scheduledEventId ? Number(data.scheduledEventId) : undefined;
+    let eventTriggerId = data.eventTriggerId ? Number(data.eventTriggerId) : undefined;
+
+    if (!scheduledEventId && eventTriggerId) {
+      const trigger = await this.prisma.eventTrigger.findUnique({
+        where: { id: eventTriggerId }
+      });
+      if (trigger) {
+        scheduledEventId = trigger.scheduledEventId;
+      }
+    }
+
+    if (!scheduledEventId) {
+      throw new Error('scheduledEventId or valid eventTriggerId is required');
+    }
+
+    const s3Key = this.s3Storage.buildAttachmentKey(scheduledEventId, data.fileName);
+    await this.s3Storage.uploadBuffer(s3Key, data.fileBuffer, data.mimeType || 'application/octet-stream');
+
+    const attachment = await this.prisma.eventAttachment.create({
+      data: {
+        scheduledEventId,
+        eventTriggerId: eventTriggerId || null,
+        fileName: data.fileName,
+        s3Key,
+        fileSize: data.fileBuffer.length,
+        mimeType: data.mimeType || 'application/octet-stream',
+        telegramFileId: data.telegramFileId || null,
+        uploadedBy: data.uploadedBy || 'system',
+      }
+    });
+
+    const downloadUrl = this.s3Storage.getSignedDownloadUrl(s3Key) || `/api/events/attachments/${attachment.id}/download`;
+
+    return {
+      ...this.serialize(attachment),
+      downloadUrl
+    };
+  }
+
+  async findScheduledEventsFiltered(filters: { tenantId?: number; apartmentId?: number; accountId?: number; activeOnly?: boolean }) {
+    const where: any = {};
+    if (filters.tenantId) where.tenantId = Number(filters.tenantId);
+    if (filters.apartmentId) where.apartmentId = Number(filters.apartmentId);
+    if (filters.accountId) where.accountId = Number(filters.accountId);
+    if (filters.activeOnly) where.active = true;
+
+    const events = await this.prisma.scheduledEvent.findMany({
+      where,
+      include: {
+        account: { include: { apartment: true } },
+        tenant: { include: { user: true, apartment: true } },
+        apartment: true,
+        attachments: { orderBy: { createdAt: 'desc' } }
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+
+    return events.map((event: any) => ({
+      ...this.serialize(event),
+      attachments: (event.attachments || []).map((att: any) => ({
+        ...this.serialize(att),
+        downloadUrl: this.s3Storage.getSignedDownloadUrl(att.s3Key) || `/api/events/attachments/${att.id}/download`
+      }))
+    }));
+  }
+
+  async getEventAttachments(scheduledEventId: number) {
+    const attachments = await this.prisma.eventAttachment.findMany({
+      where: { scheduledEventId: Number(scheduledEventId) },
+      orderBy: { createdAt: 'desc' }
+    });
+
+    return attachments.map((att) => ({
+      ...this.serialize(att),
+      downloadUrl: this.s3Storage.getSignedDownloadUrl(att.s3Key) || `/api/events/attachments/${att.id}/download`
+    }));
+  }
+
+  async deleteEventAttachment(id: number) {
+    const att = await this.prisma.eventAttachment.findUnique({
+      where: { id: Number(id) }
+    });
+    if (!att) {
+      throw new NotFoundException(`Attachment #${id} not found`);
+    }
+    await this.prisma.eventAttachment.delete({
+      where: { id: Number(id) }
+    });
+    return { success: true };
+  }
 }
+
 
 function normalizePeriod(period: string): string {
   const trimmed = period.trim();

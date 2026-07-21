@@ -21,9 +21,15 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import EditIcon from '@mui/icons-material/Edit';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import TelegramIcon from '@mui/icons-material/Telegram';
+import CloudUploadIcon from '@mui/icons-material/CloudUpload';
+import AttachFileIcon from '@mui/icons-material/AttachFile';
+import DownloadIcon from '@mui/icons-material/Download';
+import DeleteIcon from '@mui/icons-material/Delete';
+import CloseIcon from '@mui/icons-material/Close';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
+import DialogContentText from '@mui/material/DialogContentText';
 import DialogActions from '@mui/material/DialogActions';
 
 interface EventTriggerItem {
@@ -33,6 +39,18 @@ interface EventTriggerItem {
   comment: string | null;
   processedAt: string | null;
   sentTelegramAt: string | null;
+}
+
+interface EventAttachmentItem {
+  id: number;
+  fileName: string;
+  s3Key: string;
+  fileSize?: number | null;
+  mimeType?: string | null;
+  telegramFileId?: string | null;
+  uploadedBy?: string | null;
+  createdAt: string;
+  downloadUrl?: string | null;
 }
 
 interface ScheduledEventDetail {
@@ -55,6 +73,7 @@ interface ScheduledEventDetail {
   tenant?: { user?: { name: string | null }; apartment?: { address: string | null } } | null;
   apartment?: { address: string | null } | null;
   triggers: EventTriggerItem[];
+  attachments?: EventAttachmentItem[];
 }
 
 const fetcher = (url: string) => axios.get(url).then(res => res.data);
@@ -67,6 +86,9 @@ export default function EventDetailPage({ params }: { params: { id: string } }) 
   const [commentInput, setCommentInput] = useState('');
   const [isUpdating, setIsUpdating] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [deleteAttachmentId, setDeleteAttachmentId] = useState<number | null>(null);
 
   const { data: event, error, isLoading, mutate } = useSWR<ScheduledEventDetail>(
     `/api/events/${eventId}`,
@@ -78,6 +100,43 @@ export default function EventDetailPage({ params }: { params: { id: string } }) 
 
   if (isLoading) return <div className={styles.emptyState}>Загрузка информации о событии...</div>;
   if (error || !event) return <div className={styles.emptyState}>Событие не найдено.</div>;
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      setIsUploading(true);
+      const reader = new FileReader();
+      reader.onload = async () => {
+        const base64 = (reader.result as string).split(',')[1];
+        await axios.post(`/api/events/${eventId}/attachments`, {
+          fileName: file.name,
+          fileBufferBase64: base64,
+          mimeType: file.type,
+          uploadedBy: 'admin-ui'
+        });
+        mutate();
+        setIsUploading(false);
+      };
+      reader.readAsDataURL(file);
+    } catch {
+      alert('Ошибка при загрузке файла.');
+      setIsUploading(false);
+    }
+  };
+
+  const handleDeleteAttachment = async () => {
+    if (!deleteAttachmentId) return;
+    try {
+      await axios.delete(`/api/events/attachments/${deleteAttachmentId}`);
+      mutate();
+    } catch {
+      alert('Ошибка при удалении документа.');
+    } finally {
+      setDeleteAttachmentId(null);
+    }
+  };
 
   const handleOpenProcessModal = (trigger: EventTriggerItem) => {
     setSelectedTrigger(trigger);
@@ -208,6 +267,108 @@ export default function EventDetailPage({ params }: { params: { id: string } }) 
         </div>
       </Paper>
 
+      {/* Attachments Section */}
+      <Paper className={styles.tableCard} style={{ padding: '24px', marginBottom: '24px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
+          <div>
+            <h3 style={{ margin: 0, fontSize: '1.2rem', color: '#0f172a', fontWeight: 700 }}>
+              Прикрепленные документы и фотографии
+            </h3>
+            <span style={{ fontSize: '0.85rem', color: '#64748b' }}>
+              Документы, отправленные из Telegram-бота или загруженные вручную
+            </span>
+          </div>
+
+          <label>
+            <input
+              type="file"
+              accept="image/*,application/pdf"
+              onChange={handleFileUpload}
+              style={{ display: 'none' }}
+              disabled={isUploading}
+            />
+            <Button
+              component="span"
+              variant="outlined"
+              disabled={isUploading}
+              startIcon={<CloudUploadIcon />}
+              style={{ textTransform: 'none', color: '#0284c7', borderColor: '#38bdf8', fontWeight: 600 }}
+            >
+              {isUploading ? 'Загрузка...' : 'Загрузить файл'}
+            </Button>
+          </label>
+        </div>
+
+        {event.attachments && event.attachments.length > 0 ? (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '16px' }}>
+            {event.attachments.map((att) => {
+              const isImage = att.mimeType?.startsWith('image/') || /\.(jpg|jpeg|png|webp|gif)$/i.test(att.fileName);
+              return (
+                <div
+                  key={att.id}
+                  style={{
+                    border: '1px solid #e2e8f0',
+                    borderRadius: '8px',
+                    padding: '12px',
+                    backgroundColor: '#f8fafc',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: 'space-between'
+                  }}
+                >
+                  {isImage && att.downloadUrl ? (
+                    <div
+                      style={{ height: '140px', borderRadius: '6px', overflow: 'hidden', cursor: 'pointer', marginBottom: '8px', backgroundColor: '#e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                      onClick={() => setSelectedImage(att.downloadUrl || null)}
+                    >
+                      <img src={att.downloadUrl} alt={att.fileName} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    </div>
+                  ) : (
+                    <div style={{ height: '100px', borderRadius: '6px', backgroundColor: '#e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '8px' }}>
+                      <AttachFileIcon style={{ fontSize: '2.5rem', color: '#64748b' }} />
+                    </div>
+                  )}
+
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: '0.9rem', color: '#0f172a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={att.fileName}>
+                      {att.fileName}
+                    </div>
+                    <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '2px' }}>
+                      {formatDateTime(att.createdAt)} ({att.uploadedBy || 'система'})
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '12px', paddingTop: '8px', borderTop: '1px solid #e2e8f0' }}>
+                    {att.downloadUrl ? (
+                      <a
+                        href={att.downloadUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={{ fontSize: '0.8rem', color: '#0284c7', textDecoration: 'none', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                      >
+                        <DownloadIcon style={{ fontSize: '1rem' }} /> Скачать
+                      </a>
+                    ) : <span />}
+
+                    <button
+                      onClick={() => setDeleteAttachmentId(att.id)}
+                      style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', padding: '4px' }}
+                      title="Удалить файл"
+                    >
+                      <DeleteIcon style={{ fontSize: '1rem' }} />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className={styles.emptyState} style={{ padding: '24px 0' }}>
+            Прикрепленные файлы отсутствуют. Вы можете отправлять фотографии боту в Telegram или загружать файлы прямо отсюда.
+          </div>
+        )}
+      </Paper>
+
       {/* Triggers History Header */}
       <div style={{ marginBottom: '16px' }}>
         <h3 style={{ margin: 0, fontSize: '1.2rem', color: '#0f172a', fontWeight: 700 }}>
@@ -334,6 +495,51 @@ export default function EventDetailPage({ params }: { params: { id: string } }) 
         apartments={apartments}
         eventToEdit={event}
       />
+
+      {/* Image Preview Overlay Modal */}
+      {selectedImage && (
+        <div className={styles.modalOverlay} onClick={() => setSelectedImage(null)}>
+          <div className={styles.modalContent} onClick={(e) => e.stopPropagation()}>
+            <div className={styles.modalHeader}>
+              <span className={styles.modalTitle}>Просмотр документа / изображения</span>
+              <button className={styles.modalCloseBtn} onClick={() => setSelectedImage(null)}>
+                <CloseIcon />
+              </button>
+            </div>
+            <div className={styles.modalBody}>
+              <img
+                src={selectedImage}
+                alt="Просмотр"
+                className={styles.largeReceiptImage}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Attachment Confirmation Dialog */}
+      <Dialog
+        open={deleteAttachmentId !== null}
+        onClose={() => setDeleteAttachmentId(null)}
+      >
+        <DialogTitle style={{ fontWeight: 700 }}>
+          Подтверждение удаления документа
+        </DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            Вы действительно хотите удалить этот прикрепленный документ? Файл будет удален из системы.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions style={{ padding: '16px 24px' }}>
+          <Button onClick={() => setDeleteAttachmentId(null)} variant="outlined" style={{ color: '#475569', borderColor: '#cbd5e1', textTransform: 'none' }}>
+            Отмена
+          </Button>
+          <Button onClick={handleDeleteAttachment} color="error" variant="contained" style={{ textTransform: 'none', backgroundColor: '#ef4444' }} autoFocus>
+            Удалить документ
+          </Button>
+        </DialogActions>
+      </Dialog>
     </div>
   );
 }
+

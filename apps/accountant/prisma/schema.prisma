@@ -191,6 +191,7 @@ model ScheduledEvent {
   tenant          Tenant?        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   apartment       Apartment?     @relation(fields: [apartmentId], references: [id], onDelete: Cascade)
   triggers        EventTrigger[]
+  attachments     EventAttachment[]
 
   @@map("scheduled_events")
 }
@@ -207,6 +208,26 @@ model EventTrigger {
   updatedAt        DateTime       @updatedAt @map("updated_at")
 
   scheduledEvent   ScheduledEvent @relation(fields: [scheduledEventId], references: [id], onDelete: Cascade)
+  attachments      EventAttachment[]
 
   @@map("event_triggers")
 }
+
+model EventAttachment {
+  id               Int            @id @default(autoincrement())
+  scheduledEventId Int?           @map("scheduled_event_id")
+  eventTriggerId   Int?           @map("event_trigger_id")
+  fileName         String         @map("file_name")
+  s3Key            String         @map("s3_key")
+  fileSize         Int?           @map("file_size")
+  mimeType         String?        @map("mime_type")
+  telegramFileId   String?        @map("telegram_file_id")
+  uploadedBy       String?        @map("uploaded_by")
+  createdAt        DateTime       @default(now()) @map("created_at")
+
+  scheduledEvent   ScheduledEvent? @relation(fields: [scheduledEventId], references: [id], onDelete: Cascade)
+  eventTrigger     EventTrigger?   @relation(fields: [eventTriggerId], references: [id], onDelete: Cascade)
+
+  @@map("event_attachments")
+}
+
