@@ -450,22 +450,23 @@ export class TelegramBotController {
     const freqText = data.frequency === 'quarterly' ? 'Каждые 3 месяца' : 'Каждый месяц';
     const dayText = data.dayOfMonth ? `${data.dayOfMonth}-го числа` : '';
 
-    let message = '';
-    if (data.telegramTemplate && data.telegramTemplate.trim()) {
-      message = data.telegramTemplate
-        .replace(/\{title\}/g, data.title || '')
-        .replace(/\{description\}/g, data.description || '')
-        .replace(/\{frequency\}/g, freqText)
-        .replace(/\{dayOfMonth\}/g, dayText)
-        .replace(/\{targetType\}/g, data.targetType || '');
-    } else {
-      message = `📅 <b>Запланированное событие!</b>\n\n` +
-        `📌 <b>${data.title}</b>\n` +
-        `${data.description ? `📝 ${data.description}\n` : ''}` +
-        `🔄 Периодичность: ${freqText} ${dayText}\n` +
-        `🎯 Объект: ${data.targetType}\n\n` +
-        `⚡ Пожалуйста, проверьте статус события в панели управления!`;
-    }
+    let targetLabel = data.targetType;
+    if (data.targetType === 'account') targetLabel = 'Лицевой счет';
+    else if (data.targetType === 'tenant') targetLabel = 'Арендатор';
+    else if (data.targetType === 'apartment') targetLabel = 'Квартира';
+    else if (data.targetType === 'general') targetLabel = 'Общее событие';
+
+    const customTextSection = data.telegramTemplate && data.telegramTemplate.trim()
+      ? `💬 <b>Сообщение:</b> ${data.telegramTemplate.trim()}\n`
+      : '';
+
+    const message = `📅 <b>Запланированное событие!</b>\n\n` +
+      `📌 <b>${data.title}</b>\n` +
+      `${data.description ? `📝 ${data.description}\n` : ''}` +
+      `🔄 Периодичность: ${freqText} ${dayText}\n` +
+      `🎯 Объект: ${targetLabel}\n` +
+      `${customTextSection}\n` +
+      `⚡ Пожалуйста, проверьте статус события в панели управления!`;
 
     await this.notifyAdmins(message, `scheduled_event_triggered (#${data.eventId})`);
   }

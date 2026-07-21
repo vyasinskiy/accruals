@@ -323,17 +323,17 @@ export default React.memo(function CreateEditEventModal({
             {sendTelegram && (
               <div>
                 <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '4px', color: '#334155' }}>
-                  Текст уведомления в Telegram (шаблон):
+                  Дополнительное сообщение / текст для Telegram:
                 </label>
                 <textarea
-                  placeholder="Укажите шаблон сообщения. Переменные: {title}, {description}, {frequency}, {dayOfMonth}, {targetType}"
+                  placeholder="Введите дополнительное примечание или текст..."
                   value={telegramTemplate}
                   onChange={(e) => setTelegramTemplate(e.target.value)}
                   className={styles.searchInput}
                   style={{ width: '100%', height: '70px', padding: '8px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', resize: 'vertical', fontSize: '0.85rem' }}
                 />
                 <span style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '2px', display: 'block' }}>
-                  Если оставить пустым, будет отправлено стандартное системное сообщение.
+                  Этот текст будет встроен внутрь стандартного оформленного сообщения Telegram.
                 </span>
               </div>
             )}
