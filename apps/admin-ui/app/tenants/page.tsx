@@ -28,6 +28,8 @@ import MenuItem from '@mui/material/MenuItem';
 import Select from '@mui/material/Select';
 import InputLabel from '@mui/material/InputLabel';
 import FormControl from '@mui/material/FormControl';
+import FormControlLabel from '@mui/material/FormControlLabel';
+import Checkbox from '@mui/material/Checkbox';
 
 interface Tenant {
   id: number;
@@ -56,13 +58,14 @@ const fetcher = (url: string) => axios.get(url).then(res => res.data);
 
 export default function TenantsPage() {
   const router = useRouter();
-  const { data: tenants, error, mutate, isLoading } = useSWR<Tenant[]>('/api/tenants', fetcher);
+  const [showDeleted, setShowDeleted] = useState(false);
+  const { data: tenants, error, mutate, isLoading } = useSWR<Tenant[]>(`/api/tenants${showDeleted ? '?includeDeleted=true' : ''}`, fetcher);
   const { data: apartments } = useSWR<Apartment[]>('/api/apartments', fetcher);
 
   const [search, setSearch] = useState('');
   
   // Dialog state for delete
-  const [deleteId, setDeleteId] = useState<number | null>(null);
+  const [deleteInfo, setDeleteInfo] = useState<{ id: number; force: boolean } | null>(null);
 
   // Dialog state for Add/Edit
   const [formOpen, setFormOpen] = useState(false);
@@ -140,19 +143,19 @@ export default function TenantsPage() {
   };
 
   // Delete Action
-  const handleDeleteClick = (id: number) => {
-    setDeleteId(id);
+  const handleDeleteClick = (id: number, force: boolean) => {
+    setDeleteInfo({ id, force });
   };
 
   const handleConfirmDelete = async () => {
-    if (!deleteId) return;
+    if (!deleteInfo) return;
     try {
-      await axios.delete(`/api/tenants/${deleteId}`);
+      await axios.delete(`/api/tenants/${deleteInfo.id}${deleteInfo.force ? '?force=true' : ''}`);
       mutate();
     } catch (err: unknown) {
       alert('Ошибка при удалении арендатора.');
     } finally {
-      setDeleteId(null);
+      setDeleteInfo(null);
     }
   };
 
@@ -194,6 +197,18 @@ export default function TenantsPage() {
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
+
+        <FormControlLabel
+          control={
+            <Checkbox
+              checked={showDeleted}
+              onChange={(e) => setShowDeleted(e.target.checked)}
+              color="primary"
+            />
+          }
+          label="Показывать удаленных"
+          style={{ marginLeft: '16px' }}
+        />
 
         <button
           className={styles.downloadLink}
@@ -251,14 +266,25 @@ export default function TenantsPage() {
                         <EditIcon style={{ fontSize: '0.9rem' }} />
                         Изменить
                       </button>
-                      <button
-                        className={styles.rejectBtn}
-                        style={{ padding: '6px 10px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
-                        onClick={(e) => { e.stopPropagation(); handleDeleteClick(row.id); }}
-                      >
-                        <DeleteIcon style={{ fontSize: '0.9rem' }} />
-                        Удалить
-                      </button>
+                      {row.status === 'deleted' ? (
+                        <button
+                          className={styles.rejectBtn}
+                          style={{ padding: '6px 10px', display: 'inline-flex', alignItems: 'center', gap: '4px', backgroundColor: '#991b1b' }}
+                          onClick={(e) => { e.stopPropagation(); handleDeleteClick(row.id, true); }}
+                        >
+                          <DeleteIcon style={{ fontSize: '0.9rem' }} />
+                          Удалить окончательно
+                        </button>
+                      ) : (
+                        <button
+                          className={styles.rejectBtn}
+                          style={{ padding: '6px 10px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                          onClick={(e) => { e.stopPropagation(); handleDeleteClick(row.id, false); }}
+                        >
+                          <DeleteIcon style={{ fontSize: '0.9rem' }} />
+                          Удалить
+                        </button>
+                      )}
                     </div>
                   </TableCell>
                 </TableRow>
@@ -364,25 +390,28 @@ export default function TenantsPage() {
 
       {/* MUI Delete Confirmation Dialog */}
       <Dialog
-        open={deleteId !== null}
-        onClose={() => setDeleteId(null)}
+        open={deleteInfo !== null}
+        onClose={() => setDeleteInfo(null)}
         aria-labelledby="delete-tenant-title"
         aria-describedby="delete-tenant-description"
       >
         <DialogTitle id="delete-tenant-title" style={{ fontWeight: 700 }}>
-          Подтверждение удаления арендатора
+          {deleteInfo?.force ? 'Удаление навсегда' : 'Подтверждение удаления арендатора'}
         </DialogTitle>
         <DialogContent>
           <DialogContentText id="delete-tenant-description">
-            Вы действительно хотите удалить этого арендатора? Профиль арендатора и связанная с ним учетная запись пользователя будут стерты из базы данных. Это действие необратимо.
+            {deleteInfo?.force 
+              ? 'Вы действительно хотите удалить этого арендатора окончательно? Профиль арендатора и связанная с ним учетная запись пользователя будут стерты из базы данных. Это действие необратимо.'
+              : 'Вы действительно хотите удалить этого арендатора? Профиль арендатора будет помещен в архив, а связанные с ним активные уведомления будут отключены. История его платежей и начислений сохранится.'
+            }
           </DialogContentText>
         </DialogContent>
         <DialogActions style={{ padding: '16px 24px' }}>
-          <Button onClick={() => setDeleteId(null)} variant="outlined" style={{ color: '#475569', borderColor: '#cbd5e1', textTransform: 'none' }}>
+          <Button onClick={() => setDeleteInfo(null)} variant="outlined" style={{ color: '#475569', borderColor: '#cbd5e1', textTransform: 'none' }}>
             Отмена
           </Button>
           <Button onClick={handleConfirmDelete} color="error" variant="contained" style={{ textTransform: 'none', backgroundColor: '#ef4444' }} autoFocus>
-            Удалить арендатора
+            {deleteInfo?.force ? 'Удалить безвозвратно' : 'Удалить арендатора'}
           </Button>
         </DialogActions>
       </Dialog>

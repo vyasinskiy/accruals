@@ -793,8 +793,10 @@ export class AccountantService {
     return this.prisma.meterSubmissionEvent.delete({ where: { id } });
   }
 
-  async findTenants() {
+  async findTenants(includeDeleted: boolean = false) {
+    const whereClause = includeDeleted ? {} : { status: { not: 'deleted' } };
     const results = await this.prisma.tenant.findMany({
+      where: whereClause,
       include: {
         user: true,
         apartment: true,
@@ -869,6 +871,25 @@ export class AccountantService {
   }
 
   async deleteTenant(id: number) {
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id }
+    });
+    if (!tenant) throw new NotFoundException(`Tenant with ID ${id} not found`);
+    
+    const updatedTenant = await this.prisma.tenant.update({
+      where: { id },
+      data: { status: 'deleted' }
+    });
+
+    await this.prisma.scheduledEvent.updateMany({
+      where: { tenantId: id },
+      data: { active: false }
+    });
+
+    return updatedTenant;
+  }
+
+  async forceDeleteTenant(id: number) {
     const tenant = await this.prisma.tenant.findUnique({
       where: { id }
     });

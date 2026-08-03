@@ -242,8 +242,8 @@ export class AccountantController {
   }
 
   @Get('tenants')
-  async getTenants() {
-    return this.accountantService.findTenants();
+  async getTenants(@Query('includeDeleted') includeDeleted?: string) {
+    return this.accountantService.findTenants(includeDeleted === 'true');
   }
 
   @Post('tenants')
@@ -257,7 +257,10 @@ export class AccountantController {
   }
 
   @Delete('tenants/:id')
-  async deleteTenant(@Param('id', ParseIntPipe) id: number) {
+  async deleteTenant(@Param('id', ParseIntPipe) id: number, @Query('force') force?: string) {
+    if (force === 'true') {
+      return this.accountantService.forceDeleteTenant(id);
+    }
     return this.accountantService.deleteTenant(id);
   }
 

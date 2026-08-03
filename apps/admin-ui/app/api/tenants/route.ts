@@ -1,9 +1,10 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { accountantClient } from '../../../lib/accountant-client';
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    const { data } = await accountantClient.get('/tenants');
+    const includeDeleted = request.nextUrl.searchParams.get('includeDeleted') === 'true';
+    const { data } = await accountantClient.get(`/tenants${includeDeleted ? '?includeDeleted=true' : ''}`);
     return NextResponse.json(data);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown error';
