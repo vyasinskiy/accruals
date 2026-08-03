@@ -126,6 +126,12 @@ export class EventsService {
 
   async findScheduledEvents() {
     const events = await this.prisma.scheduledEvent.findMany({
+      where: {
+        OR: [
+          { tenantId: null },
+          { tenant: { status: { not: 'deleted' } } }
+        ]
+      },
       include: {
         account: { include: { apartment: true } },
         tenant: { include: { user: true, apartment: true } },
@@ -430,6 +436,11 @@ export class EventsService {
     if (filters.apartmentId) where.apartmentId = Number(filters.apartmentId);
     if (filters.accountId) where.accountId = Number(filters.accountId);
     if (filters.activeOnly) where.active = true;
+
+    where.OR = [
+      { tenantId: null },
+      { tenant: { status: { not: 'deleted' } } }
+    ];
 
     const events = await this.prisma.scheduledEvent.findMany({
       where,
