@@ -23,6 +23,8 @@ import DialogContent from '@mui/material/DialogContent';
 import DialogContentText from '@mui/material/DialogContentText';
 import DialogActions from '@mui/material/DialogActions';
 import Button from '@mui/material/Button';
+import EditIcon from '@mui/icons-material/Edit';
+import TextField from '@mui/material/TextField';
 
 interface Account {
   id: number;
@@ -57,6 +59,10 @@ export default function AccountsPage() {
 
   const { data: accounts, error, isLoading, mutate } = useSWR<Account[]>(apiUrl, fetcher);
 
+  const [editAccount, setEditAccount] = useState<Account | null>(null);
+  const [formCustomLabel, setFormCustomLabel] = useState('');
+  const [formSubmissionDay, setFormSubmissionDay] = useState('');
+
   const filteredAccounts = useMemo(() => {
     if (!accounts) return [];
     return accounts.filter(item => {
@@ -72,7 +78,7 @@ export default function AccountsPage() {
   if (error) return <div className={styles.emptyState}>Ошибка загрузки лицевых счетов.</div>;
 
   const handleRowClick = (id: number) => {
-    router.push(`/invoices?accountId=${id}`);
+    router.push(`/accounts/${id}`);
   };
 
   const handleClearFilter = () => {
@@ -82,6 +88,27 @@ export default function AccountsPage() {
   const handleDeleteClick = (e: React.MouseEvent, id: number) => {
     e.stopPropagation();
     setDeleteId(id);
+  };
+
+  const handleEditClick = (e: React.MouseEvent, account: Account) => {
+    e.stopPropagation();
+    setEditAccount(account);
+    setFormCustomLabel(account.customLabel || '');
+    setFormSubmissionDay(String(account.meterSubmissionDay || '20'));
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editAccount) return;
+    try {
+      await axios.put(`/api/accounts/${editAccount.id}`, {
+        customLabel: formCustomLabel.trim() || null,
+        meterSubmissionDay: parseInt(formSubmissionDay, 10) || null
+      });
+      mutate();
+      setEditAccount(null);
+    } catch (err: unknown) {
+      alert('Ошибка при сохранении лицевого счета.');
+    }
   };
 
   const handleConfirmDelete = async () => {
@@ -175,6 +202,14 @@ export default function AccountsPage() {
                         Выставить счет
                       </button>
                       <button
+                        className={styles.downloadLink}
+                        style={{ padding: '6px 10px', display: 'inline-flex', alignItems: 'center', gap: '4px', textDecoration: 'none', border: '1px solid #cbd5e1', cursor: 'pointer', backgroundColor: '#fff', color: '#475569' }}
+                        onClick={(e) => handleEditClick(e, row)}
+                      >
+                        <EditIcon style={{ fontSize: '0.9rem' }} />
+                        Изменить
+                      </button>
+                      <button
                         className={styles.rejectBtn}
                         style={{ padding: '6px 10px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
                         onClick={(e) => handleDeleteClick(e, row.id)}
@@ -218,6 +253,45 @@ export default function AccountsPage() {
           </Button>
           <Button onClick={handleConfirmDelete} color="error" variant="contained" style={{ textTransform: 'none', backgroundColor: '#ef4444' }} autoFocus>
             Удалить счет
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Edit Account Modal */}
+      <Dialog
+        open={editAccount !== null}
+        onClose={() => setEditAccount(null)}
+        fullWidth
+        maxWidth="sm"
+      >
+        <DialogTitle style={{ fontWeight: 700 }}>
+          Редактирование лицевого счета {editAccount?.accountNumber}
+        </DialogTitle>
+        <DialogContent style={{ display: 'flex', flexDirection: 'column', gap: '16px', paddingTop: '16px' }}>
+          <TextField
+            label="Свое название (custom label)"
+            variant="outlined"
+            fullWidth
+            value={formCustomLabel}
+            onChange={(e) => setFormCustomLabel(e.target.value)}
+            placeholder="Например: Моя квартира"
+          />
+          <TextField
+            label="День подачи показаний"
+            type="number"
+            variant="outlined"
+            fullWidth
+            value={formSubmissionDay}
+            onChange={(e) => setFormSubmissionDay(e.target.value)}
+            inputProps={{ min: 1, max: 31 }}
+          />
+        </DialogContent>
+        <DialogActions style={{ padding: '16px 24px' }}>
+          <Button onClick={() => setEditAccount(null)} variant="outlined" style={{ color: '#475569', borderColor: '#cbd5e1', textTransform: 'none' }}>
+            Отмена
+          </Button>
+          <Button onClick={handleSaveEdit} variant="contained" style={{ textTransform: 'none', backgroundColor: '#4f46e5' }}>
+            Сохранить
           </Button>
         </DialogActions>
       </Dialog>

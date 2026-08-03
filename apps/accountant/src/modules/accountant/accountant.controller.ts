@@ -66,6 +66,11 @@ export class AccountantController {
     return this.accountantService.findAccounts(query);
   }
 
+  @Get('accounts/:id')
+  async findAccountById(@Param('id', ParseIntPipe) id: number) {
+    return this.accountantService.findAccountById(id);
+  }
+
   @Get('accruals')
   async findAccruals(@Query() query: any) {
     return this.accountantService.findAccruals(query);
@@ -131,7 +136,7 @@ export class AccountantController {
 
   @MessagePattern('update_account_custom_label')
   async updateAccountCustomLabel(@Payload() data: { accountId: number; customLabel: string | null }) {
-    return this.accountantService.updateAccountCustomLabel(data.accountId, data.customLabel);
+    return this.accountantService.updateAccount(data.accountId, { customLabel: data.customLabel });
   }
 
   @MessagePattern('create_active_tenant_manual')
@@ -162,10 +167,12 @@ export class AccountantController {
   }
 
   @Get('payments')
-  async findPayments(@Query() query: { userId?: string; status?: string; userName?: string }) {
+  async findPayments(@Query() query: { userId?: string; status?: string; userName?: string; accountId?: string }) {
     const userId = query.userId ? parseInt(query.userId, 10) : undefined;
+    const accountId = query.accountId ? parseInt(query.accountId, 10) : undefined;
     return this.accountantService.findPayments({
       userId: isNaN(Number(userId)) ? undefined : userId,
+      accountId: isNaN(Number(accountId)) ? undefined : accountId,
       status: query.status,
       userName: query.userName,
     });
@@ -224,6 +231,14 @@ export class AccountantController {
   @Delete('accounts/:id')
   async deleteAccount(@Param('id', ParseIntPipe) id: number) {
     return this.accountantService.deleteAccount(id);
+  }
+
+  @Put('accounts/:id')
+  async updateAccount(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() data: { customLabel?: string | null; meterSubmissionDay?: number | null }
+  ) {
+    return this.accountantService.updateAccount(id, data);
   }
 
   @Delete('invoices/:id')

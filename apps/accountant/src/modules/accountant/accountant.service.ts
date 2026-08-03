@@ -393,10 +393,10 @@ export class AccountantService {
     return this.serialize(result);
   }
 
-  async updateAccountCustomLabel(accountId: number, customLabel: string | null) {
+  async updateAccount(accountId: number, data: { customLabel?: string | null; meterSubmissionDay?: number | null }) {
     const result = await this.prisma.account.update({
       where: { id: accountId },
-      data: { customLabel },
+      data,
     });
     return this.serialize(result);
   }
@@ -469,7 +469,14 @@ export class AccountantService {
       ...(filters.externalId ? { externalId: { contains: filters.externalId, mode: 'insensitive' } } : {}),
       ...(filters.accountNumber ? { accountNumber: { contains: filters.accountNumber, mode: 'insensitive' } } : {}),
     };
-    const results = await this.prisma.account.findMany({ where, include: { apartment: true }, orderBy: [{ externalId: 'asc' }] });
+    const results = await this.prisma.account.findMany({
+      where,
+      include: {
+        apartment: true,
+        _count: { select: { invoices: true } }
+      },
+      orderBy: [{ externalId: 'asc' }]
+    });
     return this.serialize(results);
   }
 
@@ -700,7 +707,7 @@ export class AccountantService {
     return this.serialize({ account, invoice, storageKey, downloadUrl });
   }
 
-  async findPayments(filters: { userId?: number; status?: string; userName?: string } = {}) {
+  async findPayments(filters: { userId?: number; status?: string; userName?: string; accountId?: number } = {}) {
     const where: Prisma.PaymentWhereInput = {};
     if (filters.userId) {
       where.userId = Number(filters.userId);
@@ -710,6 +717,19 @@ export class AccountantService {
     }
     if (filters.userName) {
       where.userName = { contains: filters.userName, mode: 'insensitive' };
+    }
+    if (filters.accountId) {
+      const account = await this.prisma.account.findUnique({
+        where: { id: Number(filters.accountId) },
+        include: { apartment: { include: { tenants: true } } }
+      });
+      if (account?.apartment?.tenants?.length) {
+        const userIds = account.apartment.tenants.map(t => t.userId);
+        where.userId = { in: userIds };
+      } else {
+        // If no tenants, return no payments
+        where.userId = -1;
+      }
     }
     const results = await this.prisma.payment.findMany({
       where,
@@ -756,6 +776,17 @@ export class AccountantService {
       orderBy: [{ createdAt: 'desc' }],
     });
     return this.serialize(results);
+  }
+
+  async findAccountById(id: number) {
+    const result = await this.prisma.account.findUnique({
+      where: { id },
+      include: {
+        apartment: true,
+        _count: { select: { invoices: true } }
+      }
+    });
+    return this.serialize(result);
   }
 
   async getStats() {

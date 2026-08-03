@@ -7,11 +7,13 @@ export async function GET(request: NextRequest) {
     const userId = searchParams.get('userId');
     const status = searchParams.get('status');
     const userName = searchParams.get('userName');
+    const accountId = searchParams.get('accountId');
 
     const params: Record<string, string> = {};
     if (userId) params.userId = userId;
     if (status) params.status = status;
     if (userName) params.userName = userName;
+    if (accountId) params.accountId = accountId;
 
     const { data } = await accountantClient.get('/payments', { params });
     return NextResponse.json(data);
