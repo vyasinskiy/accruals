@@ -785,6 +785,14 @@ export class AccountantService {
     return this.prisma.invoice.delete({ where: { id } });
   }
 
+  async bulkDeleteInvoices(ids: number[]) {
+    return this.prisma.invoice.deleteMany({
+      where: {
+        id: { in: ids }
+      }
+    });
+  }
+
   async deletePayment(id: number) {
     return this.prisma.payment.delete({ where: { id } });
   }

@@ -231,6 +231,14 @@ export class AccountantController {
     return this.accountantService.deleteInvoice(id);
   }
 
+  @Post('invoices/bulk-delete')
+  async bulkDeleteInvoices(@Body() dto: { ids: number[] }) {
+    if (!dto.ids || !Array.isArray(dto.ids)) {
+      throw new Error('Invalid ids array');
+    }
+    return this.accountantService.bulkDeleteInvoices(dto.ids);
+  }
+
   @Delete('payments/:id')
   async deletePayment(@Param('id', ParseIntPipe) id: number) {
     return this.accountantService.deletePayment(id);

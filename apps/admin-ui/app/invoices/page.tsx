@@ -26,6 +26,7 @@ import DialogContent from '@mui/material/DialogContent';
 import DialogContentText from '@mui/material/DialogContentText';
 import DialogActions from '@mui/material/DialogActions';
 import Button from '@mui/material/Button';
+import Checkbox from '@mui/material/Checkbox';
 
 interface Apartment {
   id: number;
@@ -78,6 +79,9 @@ export default function InvoicesPage() {
   const [fromMonth, setFromMonth] = useState<string>('');
   const [toMonth, setToMonth] = useState<string>('');
   const [deleteId, setDeleteId] = useState<number | null>(null);
+
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [isBulkDeleteModalOpen, setIsBulkDeleteModalOpen] = useState(false);
 
   // Modal State for Manual Invoice
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -191,10 +195,53 @@ export default function InvoicesPage() {
     try {
       await axios.delete(`/api/invoices/${deleteId}`);
       mutate();
+      setSelectedIds(prev => prev.filter(id => id !== deleteId));
     } catch (err: unknown) {
       alert('Ошибка при удалении начисления.');
     } finally {
       setDeleteId(null);
+    }
+  };
+
+  const handleSelectAllClick = (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (event.target.checked) {
+      const newSelecteds = filteredInvoices.map((n) => n.id);
+      setSelectedIds(newSelecteds);
+      return;
+    }
+    setSelectedIds([]);
+  };
+
+  const handleSelectClick = (event: React.ChangeEvent<HTMLInputElement>, id: number) => {
+    const selectedIndex = selectedIds.indexOf(id);
+    let newSelected: number[] = [];
+
+    if (selectedIndex === -1) {
+      newSelected = newSelected.concat(selectedIds, id);
+    } else if (selectedIndex === 0) {
+      newSelected = newSelected.concat(selectedIds.slice(1));
+    } else if (selectedIndex === selectedIds.length - 1) {
+      newSelected = newSelected.concat(selectedIds.slice(0, -1));
+    } else if (selectedIndex > 0) {
+      newSelected = newSelected.concat(
+        selectedIds.slice(0, selectedIndex),
+        selectedIds.slice(selectedIndex + 1),
+      );
+    }
+
+    setSelectedIds(newSelected);
+  };
+
+  const handleConfirmBulkDelete = async () => {
+    if (selectedIds.length === 0) return;
+    try {
+      await axios.post(`/api/invoices/bulk-delete`, { ids: selectedIds });
+      mutate();
+      setSelectedIds([]);
+    } catch (err: unknown) {
+      alert('Ошибка при массовом удалении начислений.');
+    } finally {
+      setIsBulkDeleteModalOpen(false);
     }
   };
 
@@ -283,6 +330,17 @@ export default function InvoicesPage() {
             Найдено: <strong>{filteredInvoices.length}</strong>
           </div>
 
+          {selectedIds.length > 0 && (
+            <button
+              className={styles.rejectBtn}
+              style={{ padding: '9px 16px', display: 'flex', alignItems: 'center', gap: '6px', border: 'none', cursor: 'pointer', backgroundColor: '#ef4444', color: '#fff', fontWeight: 600 }}
+              onClick={() => setIsBulkDeleteModalOpen(true)}
+            >
+              <DeleteIcon style={{ fontSize: '1.2rem' }} />
+              Удалить выбранные ({selectedIds.length})
+            </button>
+          )}
+
           <button
             className={styles.downloadLink}
             style={{ padding: '9px 16px', display: 'flex', alignItems: 'center', gap: '6px', border: 'none', cursor: 'pointer', backgroundColor: '#4f46e5', color: '#fff', fontWeight: 600 }}
@@ -299,6 +357,15 @@ export default function InvoicesPage() {
         <Table aria-label="invoices table">
           <TableHead>
             <TableRow>
+              <TableCell padding="checkbox">
+                <Checkbox
+                  color="primary"
+                  indeterminate={selectedIds.length > 0 && selectedIds.length < filteredInvoices.length}
+                  checked={filteredInvoices.length > 0 && selectedIds.length === filteredInvoices.length}
+                  onChange={handleSelectAllClick}
+                  inputProps={{ 'aria-label': 'select all invoices' }}
+                />
+              </TableCell>
               <TableCell style={{ fontWeight: 'bold' }}>ID</TableCell>
               <TableCell style={{ fontWeight: 'bold' }}>Адрес квартиры</TableCell>
               <TableCell style={{ fontWeight: 'bold' }}>Лицевой счет и Название</TableCell>
@@ -312,9 +379,24 @@ export default function InvoicesPage() {
           </TableHead>
           <TableBody>
             {filteredInvoices.length > 0 ? (
-              filteredInvoices.map((row) => (
-                <TableRow key={row.id}>
-                  <TableCell>{row.id}</TableCell>
+              filteredInvoices.map((row) => {
+                const isItemSelected = selectedIds.indexOf(row.id) !== -1;
+                return (
+                  <TableRow 
+                    key={row.id}
+                    hover
+                    role="checkbox"
+                    aria-checked={isItemSelected}
+                    selected={isItemSelected}
+                  >
+                    <TableCell padding="checkbox">
+                      <Checkbox
+                        color="primary"
+                        checked={isItemSelected}
+                        onChange={(e) => handleSelectClick(e, row.id)}
+                      />
+                    </TableCell>
+                    <TableCell>{row.id}</TableCell>
                   <TableCell style={{ fontWeight: 500, color: '#1e293b', maxWidth: '200px' }}>
                     {row.account?.apartment?.address || 'Не указана'}
                   </TableCell>
@@ -377,10 +459,11 @@ export default function InvoicesPage() {
                     </div>
                   </TableCell>
                 </TableRow>
-              ))
+                );
+              })
             ) : (
               <TableRow>
-                <TableCell colSpan={9} align="center">
+                <TableCell colSpan={10} align="center">
                   <div className={styles.emptyState}>Начисления не найдены</div>
                 </TableCell>
               </TableRow>
@@ -419,6 +502,31 @@ export default function InvoicesPage() {
           </Button>
           <Button onClick={handleConfirmDelete} color="error" variant="contained" style={{ textTransform: 'none', backgroundColor: '#ef4444' }} autoFocus>
             Удалить инвойс
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* MUI Bulk Delete Confirmation Dialog */}
+      <Dialog
+        open={isBulkDeleteModalOpen}
+        onClose={() => setIsBulkDeleteModalOpen(false)}
+        aria-labelledby="bulk-delete-title"
+        aria-describedby="bulk-delete-description"
+      >
+        <DialogTitle id="bulk-delete-title" style={{ fontWeight: 700 }}>
+          Массовое удаление начислений
+        </DialogTitle>
+        <DialogContent>
+          <DialogContentText id="bulk-delete-description">
+            Вы действительно хотите удалить {selectedIds.length} выбранных инвойсов? Данное действие необратимо.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions style={{ padding: '16px 24px' }}>
+          <Button onClick={() => setIsBulkDeleteModalOpen(false)} variant="outlined" style={{ color: '#475569', borderColor: '#cbd5e1', textTransform: 'none' }}>
+            Отмена
+          </Button>
+          <Button onClick={handleConfirmBulkDelete} color="error" variant="contained" style={{ textTransform: 'none', backgroundColor: '#ef4444' }} autoFocus>
+            Удалить {selectedIds.length} инвойсов
           </Button>
         </DialogActions>
       </Dialog>

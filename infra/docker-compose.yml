@@ -122,6 +122,7 @@ services:
       RABBITMQ_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASS:-guest}@rabbitmq:5672
       PORT: 3000
       ACCOUNTANT_API_URL: http://accountant:3005
+      WATCHER_API_URL: http://watcher:4500
     depends_on:
       rabbitmq:
         condition: service_started
