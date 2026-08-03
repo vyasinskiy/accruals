@@ -1,7 +1,7 @@
 'use client';
 import * as React from 'react';
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import useSWR from 'swr';
 import axios from 'axios';
 import styles from '../shared-table.module.css';
@@ -54,9 +54,16 @@ const fetcher = (url: string) => axios.get(url).then(res => res.data);
 
 export default function EventsPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [eventToEdit, setEventToEdit] = useState<ScheduledEventItem | null>(null);
   const [deleteId, setDeleteId] = useState<number | null>(null);
+
+  React.useEffect(() => {
+    if (searchParams.get('create') === 'true') {
+      setIsModalOpen(true);
+    }
+  }, [searchParams]);
 
   const { data: events, error, isLoading, mutate } = useSWR<ScheduledEventItem[]>('/api/events', fetcher);
   const { data: accounts } = useSWR('/api/accounts', fetcher);
@@ -248,6 +255,7 @@ export default function EventsPage() {
         tenants={tenants}
         apartments={apartments}
         eventToEdit={eventToEdit}
+        initialParams={searchParams.get('tenantId') ? { targetType: 'tenant', tenantId: searchParams.get('tenantId') } : null}
       />
 
       {/* MUI Delete Confirmation Dialog */}

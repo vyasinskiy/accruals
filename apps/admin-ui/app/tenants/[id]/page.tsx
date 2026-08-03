@@ -13,6 +13,7 @@ import AccountBalanceIcon from '@mui/icons-material/AccountBalance';
 import BusinessIcon from '@mui/icons-material/Business';
 import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
 import EditIcon from '@mui/icons-material/Edit';
+import EventIcon from '@mui/icons-material/Event';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
@@ -138,14 +139,24 @@ export default function TenantDetailPage({ params }: { params: { id: string } })
           </h2>
         </div>
 
-        <Button
-          onClick={handleEditClick}
-          variant="contained"
-          startIcon={<EditIcon />}
-          style={{ backgroundColor: '#4f46e5', color: '#fff', textTransform: 'none', fontWeight: 600 }}
-        >
-          Изменить
-        </Button>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <Button
+            onClick={() => router.push(`/events?create=true&tenantId=${tenant.id}`)}
+            variant="outlined"
+            startIcon={<EventIcon />}
+            style={{ borderColor: '#4f46e5', color: '#4f46e5', textTransform: 'none', fontWeight: 600 }}
+          >
+            Создать событие
+          </Button>
+          <Button
+            onClick={handleEditClick}
+            variant="contained"
+            startIcon={<EditIcon />}
+            style={{ backgroundColor: '#4f46e5', color: '#fff', textTransform: 'none', fontWeight: 600 }}
+          >
+            Изменить
+          </Button>
+        </div>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '24px' }}>

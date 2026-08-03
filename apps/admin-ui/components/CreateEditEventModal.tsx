@@ -62,6 +62,12 @@ interface CreateEditEventModalProps {
   tenants: TenantItem[] | undefined;
   apartments: ApartmentItem[] | undefined;
   eventToEdit?: EventToEditItem | null;
+  initialParams?: {
+    targetType?: 'general' | 'account' | 'tenant' | 'apartment';
+    accountId?: string | null;
+    tenantId?: string | null;
+    apartmentId?: string | null;
+  } | null;
 }
 
 export default React.memo(function CreateEditEventModal({
@@ -71,7 +77,8 @@ export default React.memo(function CreateEditEventModal({
   accounts,
   tenants,
   apartments,
-  eventToEdit
+  eventToEdit,
+  initialParams
 }: CreateEditEventModalProps) {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -114,10 +121,19 @@ export default React.memo(function CreateEditEventModal({
         setTitle('');
         setDescription('');
         setEventType('notification');
-        setTargetType('general');
-        setAccountId(accounts && accounts.length > 0 ? String(accounts[0].id) : '');
-        setTenantId(tenants && tenants.length > 0 ? String(tenants[0].id) : '');
-        setApartmentId(apartments && apartments.length > 0 ? String(apartments[0].id) : '');
+        
+        if (initialParams) {
+          setTargetType(initialParams.targetType || 'general');
+          setTenantId(initialParams.tenantId || (tenants && tenants.length > 0 ? String(tenants[0].id) : ''));
+          setAccountId(initialParams.accountId || (accounts && accounts.length > 0 ? String(accounts[0].id) : ''));
+          setApartmentId(initialParams.apartmentId || (apartments && apartments.length > 0 ? String(apartments[0].id) : ''));
+        } else {
+          setTargetType('general');
+          setTenantId(tenants && tenants.length > 0 ? String(tenants[0].id) : '');
+          setAccountId(accounts && accounts.length > 0 ? String(accounts[0].id) : '');
+          setApartmentId(apartments && apartments.length > 0 ? String(apartments[0].id) : '');
+        }
+        
         setFrequency('monthly');
         setReminderFrequency('weekly');
         setReminderDayOfWeek(1);
@@ -129,7 +145,7 @@ export default React.memo(function CreateEditEventModal({
         setTelegramTemplate('');
       }
     }
-  }, [open, eventToEdit, accounts, tenants, apartments]);
+  }, [open, eventToEdit, accounts, tenants, apartments, initialParams]);
 
   const handleSubmit = async () => {
     if (!title.trim()) {
