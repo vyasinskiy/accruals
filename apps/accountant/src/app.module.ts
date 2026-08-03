@@ -4,7 +4,8 @@ import { PrismaModule } from './common/prisma/prisma.module';
 import { AccountantModule } from './modules/accountant/accountant.module';
 import { TenantModule } from './modules/tenant/tenant.module';
 import { UsersModule } from './modules/users/users.module';
-import { MeterEventModule } from './modules/meter-event/meter-event.module';
+import { MeterSubmissionModule } from './modules/meter-submission/meter-submission.module';
+import { EventsModule } from './modules/events/events.module';
 
 @Module({
   imports: [
@@ -13,7 +14,8 @@ import { MeterEventModule } from './modules/meter-event/meter-event.module';
     AccountantModule, 
     TenantModule, 
     UsersModule,
-    MeterEventModule
+    MeterSubmissionModule,
+    EventsModule
   ],
 })
 export class AppModule {}

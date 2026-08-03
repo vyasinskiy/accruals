@@ -171,6 +171,20 @@ export class AccountantController {
     });
   }
 
+  @Post('payments')
+  async createPaymentHttp(@Body() body: {
+    tenantId?: number;
+    userId?: number;
+    userName?: string;
+    amount: number | string;
+    receiptPhotoId?: string;
+    comment?: string;
+    createdAt?: string;
+    status?: string;
+  }) {
+    return this.accountantService.createPayment(body);
+  }
+
   @Post('payments/confirm')
   async confirmPaymentHttp(@Body() body: { paymentId: number; confirmedBy: number }) {
     return this.accountantService.confirmPayment(body.paymentId, body.confirmedBy);
@@ -252,100 +266,9 @@ export class AccountantController {
     return this.accountantService.findTenantById(id);
   }
 
-  // --- SCHEDULED EVENTS ENDPOINTS ---
-
-  @Get('events')
-  async getScheduledEvents() {
-    return this.accountantService.findScheduledEvents();
-  }
-
-  @Get('events/pending-count')
-  async getPendingTriggersCount() {
-    return this.accountantService.getPendingTriggersCount();
-  }
-
-  @Get('events/:id')
-  async getScheduledEventById(@Param('id', ParseIntPipe) id: number) {
-    return this.accountantService.findScheduledEventById(id);
-  }
-
-  @Post('events')
-  async createScheduledEvent(@Body() body: any) {
-    return this.accountantService.createScheduledEvent(body);
-  }
-
-  @Put('events/:id')
-  async updateScheduledEvent(@Param('id', ParseIntPipe) id: number, @Body() body: any) {
-    return this.accountantService.updateScheduledEvent(id, body);
-  }
-
-  @Delete('events/:id')
-  async deleteScheduledEvent(@Param('id', ParseIntPipe) id: number) {
-    return this.accountantService.deleteScheduledEvent(id);
-  }
-
-  @Put('events/triggers/:triggerId')
-  async updateEventTrigger(@Param('triggerId', ParseIntPipe) triggerId: number, @Body() body: { status?: string; comment?: string }) {
-    return this.accountantService.updateEventTrigger(triggerId, body);
-  }
-
-  // --- ATTACHMENTS & FILTERED EVENTS ---
-
-  @MessagePattern('attach_event_document')
-  async attachEventDocumentMsg(@Payload() data: {
-    scheduledEventId?: number;
-    eventTriggerId?: number;
-    fileName: string;
-    fileBufferBase64: string;
-    mimeType?: string;
-    telegramFileId?: string;
-    uploadedBy?: string;
-  }) {
-    const fileBuffer = Buffer.from(data.fileBufferBase64, 'base64');
-    return this.accountantService.attachEventDocument({
-      scheduledEventId: data.scheduledEventId,
-      eventTriggerId: data.eventTriggerId,
-      fileName: data.fileName,
-      fileBuffer,
-      mimeType: data.mimeType,
-      telegramFileId: data.telegramFileId,
-      uploadedBy: data.uploadedBy
-    });
-  }
-
-  @MessagePattern('get_scheduled_events_filtered')
-  async getScheduledEventsFilteredMsg(@Payload() filters: { tenantId?: number; apartmentId?: number; accountId?: number; activeOnly?: boolean }) {
-    return this.accountantService.findScheduledEventsFiltered(filters);
-  }
-
   @MessagePattern('get_all_tenants')
   async getAllTenantsMsg() {
     return this.accountantService.findTenants();
-  }
-
-  @Get('events/:id/attachments')
-  async getEventAttachments(@Param('id', ParseIntPipe) id: number) {
-    return this.accountantService.getEventAttachments(id);
-  }
-
-  @Post('events/:id/attachments')
-  async attachEventDocumentHttp(
-    @Param('id', ParseIntPipe) id: number,
-    @Body() body: { fileName: string; fileBufferBase64: string; mimeType?: string; uploadedBy?: string }
-  ) {
-    const fileBuffer = Buffer.from(body.fileBufferBase64, 'base64');
-    return this.accountantService.attachEventDocument({
-      scheduledEventId: id,
-      fileName: body.fileName,
-      fileBuffer,
-      mimeType: body.mimeType,
-      uploadedBy: body.uploadedBy || 'admin-ui'
-    });
-  }
-
-  @Delete('events/attachments/:attachmentId')
-  async deleteEventAttachmentHttp(@Param('attachmentId', ParseIntPipe) attachmentId: number) {
-    return this.accountantService.deleteEventAttachment(attachmentId);
   }
 }
 

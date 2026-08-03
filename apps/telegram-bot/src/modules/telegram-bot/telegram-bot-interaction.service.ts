@@ -11,9 +11,13 @@ import { formatMeterSubmissionMessage, getMeterSubmissionButtons } from './teleg
 export interface MyContext extends Context {
   match?: RegExpExecArray;
   session: {
-    state?: 'awaiting_amount' | 'awaiting_photo' | 'awaiting_admin_rent_day' | 'awaiting_admin_rent_amount' | 'admin_editing_rent_day' | 'admin_editing_rent_amount' | 'admin_editing_acc_label' | 'admin_adding_user_name' | 'admin_adding_user_rent_day' | 'admin_adding_user_rent_amount' | 'awaiting_meter_readings';
+    state?: 'awaiting_amount' | 'awaiting_photo' | 'awaiting_admin_rent_day' | 'awaiting_admin_rent_amount' | 'admin_editing_rent_day' | 'admin_editing_rent_amount' | 'admin_editing_acc_label' | 'admin_adding_user_name' | 'admin_adding_user_rent_day' | 'admin_adding_user_rent_amount' | 'awaiting_meter_readings' | 'awaiting_payment_date' | 'awaiting_payment_amount' | 'awaiting_payment_photo';
     amount?: number;
     paymentTargetTelegramId?: string;
+    paymentTenantId?: number;
+    paymentSuggestedAmount?: string;
+    paymentDate?: string;
+    paymentAmount?: number;
     editTenantId?: number;
     editApartmentId?: number;
     editAccountId?: number;
@@ -53,17 +57,29 @@ export class TelegramBotInteractionService implements OnModuleInit {
     this.bot = new Telegraf<MyContext>(config.TELEGRAM_BOT_TOKEN);
     this.bot.use(session());
 
-    // Admin Guard Middleware: ignore all users except Super Admin (allow channel posts)
+    // Guard Middleware: allow Super Admin and registered bot users (e.g. tenants)
     this.bot.use(async (ctx, next) => {
       const isChannel = ctx.chat?.type === 'channel' || ctx.updateType === 'channel_post';
       if (isChannel) {
         return next();
       }
 
-      const isSuperAdmin = ctx.from?.id.toString() === config.SUPER_ADMIN_TELEGRAM_ID;
-      if (!isSuperAdmin) {
-        // Remain silent for non-admins
+      if (!ctx.from) {
         return;
+      }
+
+      const isSuperAdmin = ctx.from.id.toString() === config.SUPER_ADMIN_TELEGRAM_ID;
+      if (!isSuperAdmin) {
+        try {
+          const registeredUser = await this.prisma.user.findUnique({
+            where: { telegramId: BigInt(ctx.from.id) }
+          });
+          if (!registeredUser) {
+            return;
+          }
+        } catch {
+          return;
+        }
       }
       return next();
     });
@@ -95,6 +111,11 @@ export class TelegramBotInteractionService implements OnModuleInit {
     this.bot.action(/attach_sel_apt_(\d+)/, (ctx) => this.handleAttachSelectEntity(ctx, 'apartment'));
     this.bot.action(/attach_sel_acc_(\d+)/, (ctx) => this.handleAttachSelectEntity(ctx, 'account'));
     this.bot.action(/attach_sel_evt_(\d+)/, (ctx) => this.handleAttachSelectEvent(ctx));
+    this.bot.action(/^tenant_pay_(\d+)(?:_(\d+(?:\.\d+)?))?$/, (ctx) => this.handleTenantPayStart(ctx));
+    this.bot.action('payment_date_today', (ctx) => this.handlePaymentDateToday(ctx));
+    this.bot.action('payment_amount_default', (ctx) => this.handlePaymentAmountDefault(ctx));
+    this.bot.action('skip_payment_photo', (ctx) => this.handleSkipPaymentPhotoAction(ctx));
+    this.bot.action('cancel_payment_flow', (ctx) => this.handleCancelPaymentFlow(ctx));
 
     // Handle channel posts for commands manually
     this.bot.on('channel_post', async (ctx, next) => {
@@ -353,6 +374,98 @@ export class TelegramBotInteractionService implements OnModuleInit {
       }
     }
 
+    if (ctx.session?.state === 'awaiting_payment_date') {
+      const messageObj = ctx.message;
+      const text = (messageObj && 'text' in messageObj) ? messageObj.text?.trim() : undefined;
+      if (!text) {
+        return ctx.reply('Пожалуйста, введите дату текстом или нажмите кнопку «Сегодня».');
+      }
+
+      let dateObj: Date | null = null;
+      const dateRegex = /^(\d{1,2})\.(\d{1,2})\.(\d{4})$/;
+      const match = text.match(dateRegex);
+      if (match) {
+        const day = parseInt(match[1], 10);
+        const month = parseInt(match[2], 10) - 1;
+        const year = parseInt(match[3], 10);
+        const parsed = new Date(year, month, day);
+        if (!isNaN(parsed.getTime()) && parsed.getDate() === day && parsed.getMonth() === month) {
+          dateObj = parsed;
+        }
+      } else {
+        const parsed = new Date(text);
+        if (!isNaN(parsed.getTime())) {
+          dateObj = parsed;
+        }
+      }
+
+      if (!dateObj) {
+        return ctx.reply(
+          '⚠️ <b>Неверный формат даты.</b>\n\n' +
+          'Пожалуйста, введите дату в формате <code>ДД.ММ.ГГГГ</code> (например, 23.07.2026) или нажмите кнопку «Сегодня»:',
+          {
+            parse_mode: 'HTML',
+            ...Markup.inlineKeyboard([
+              [Markup.button.callback('📅 Сегодня', 'payment_date_today')],
+              [Markup.button.callback('❌ Отмена', 'cancel_payment_flow')]
+            ])
+          }
+        );
+      }
+
+      ctx.session.paymentDate = dateObj.toISOString();
+      ctx.session.state = 'awaiting_payment_amount';
+
+      const defaultBtn = ctx.session.paymentSuggestedAmount
+        ? [Markup.button.callback(`💰 ${ctx.session.paymentSuggestedAmount} руб.`, 'payment_amount_default')]
+        : [];
+
+      const dateStr = dateObj.toLocaleDateString('ru-RU');
+
+      return ctx.reply(
+        `📅 <b>Дата платежа:</b> ${dateStr}\n\n` +
+        '💰 <b>Шаг 2 из 3: Укажите сумму платежа (руб.)</b>\n\n' +
+        'Введите сумму оплаты числом (например, 11000):',
+        {
+          parse_mode: 'HTML',
+          ...Markup.inlineKeyboard([
+            ...(defaultBtn.length > 0 ? [defaultBtn] : []),
+            [Markup.button.callback('❌ Отмена', 'cancel_payment_flow')]
+          ])
+        }
+      );
+    }
+
+    if (ctx.session?.state === 'awaiting_payment_amount') {
+      const messageObj = ctx.message;
+      const text = (messageObj && 'text' in messageObj) ? messageObj.text?.trim() : undefined;
+      const amount = text ? parseFloat(text.replace(',', '.')) : NaN;
+      if (isNaN(amount) || amount <= 0) {
+        return ctx.reply('⚠️ Пожалуйста, введите корректную сумму больше 0 (только число).');
+      }
+
+      ctx.session.paymentAmount = amount;
+      ctx.session.state = 'awaiting_payment_photo';
+
+      const dateStr = ctx.session.paymentDate
+        ? new Date(ctx.session.paymentDate).toLocaleDateString('ru-RU')
+        : 'Сегодня';
+
+      return ctx.reply(
+        `📅 <b>Дата:</b> ${dateStr}\n` +
+        `💰 <b>Сумма:</b> ${amount.toFixed(2)} руб.\n\n` +
+        '🧾 <b>Шаг 3 из 3: Загрузка чека об оплате</b>\n\n' +
+        'Пожалуйста, отправьте фотографию чека/квитанции об оплате или нажмите «Пропустить чек»:',
+        {
+          parse_mode: 'HTML',
+          ...Markup.inlineKeyboard([
+            [Markup.button.callback('⏩ Пропустить чек', 'skip_payment_photo')],
+            [Markup.button.callback('❌ Отмена', 'cancel_payment_flow')]
+          ])
+        }
+      );
+    }
+
     if (ctx.session?.state === 'awaiting_amount') {
       const amount = parseFloat((ctx.message as any).text.replace(',', '.'));
       if (isNaN(amount)) {
@@ -550,6 +663,15 @@ export class TelegramBotInteractionService implements OnModuleInit {
   }
 
   private async handlePhotoMessage(ctx: MyContext) {
+    if (ctx.session?.state === 'awaiting_payment_photo') {
+      const message = ctx.message as any;
+      const photo = message.photo?.[message.photo.length - 1];
+      if (!photo) {
+        return ctx.reply('Пожалуйста, отправьте фотографию чека или нажмите кнопку «Пропустить чек».');
+      }
+      return this.submitTenantPayment(ctx, photo.file_id);
+    }
+
     if (ctx.session?.state === 'awaiting_photo') {
       const message = ctx.message as any;
       const photo = message.photo[message.photo.length - 1];
@@ -861,6 +983,181 @@ export class TelegramBotInteractionService implements OnModuleInit {
     } catch (e: any) {
       this.logger.error(`Failed to attach document to event #${eventId}`, e);
       await ctx.editMessageText(`❌ Ошибка при загрузке и прикреплении документа: ${e.message || String(e)}`);
+    }
+  }
+
+  private async handleTenantPayStart(ctx: MyContext) {
+    const match = ctx.match;
+    const tenantId = match?.[1] ? parseInt(match[1], 10) : 0;
+    const suggestedAmount = match?.[2] || undefined;
+
+    ctx.session = ctx.session || {};
+    ctx.session.state = 'awaiting_payment_date';
+    ctx.session.paymentTenantId = tenantId;
+    ctx.session.paymentSuggestedAmount = suggestedAmount;
+
+    await ctx.answerCbQuery();
+    await ctx.reply(
+      '📅 <b>Шаг 1 из 3: Укажите дату платежа</b>\n\n' +
+      'Вы можете нажать «Сегодня» или ввести дату вручную в формате <code>ДД.ММ.ГГГГ</code> (например, 23.07.2026):',
+      {
+        parse_mode: 'HTML',
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback('📅 Сегодня', 'payment_date_today')],
+          [Markup.button.callback('❌ Отмена', 'cancel_payment_flow')]
+        ])
+      }
+    );
+  }
+
+  private async handlePaymentDateToday(ctx: MyContext) {
+    ctx.session = ctx.session || {};
+    ctx.session.paymentDate = new Date().toISOString();
+    ctx.session.state = 'awaiting_payment_amount';
+
+    await ctx.answerCbQuery();
+
+    const defaultBtn = ctx.session.paymentSuggestedAmount
+      ? [Markup.button.callback(`💰 ${ctx.session.paymentSuggestedAmount} руб.`, 'payment_amount_default')]
+      : [];
+
+    const dateStr = new Date().toLocaleDateString('ru-RU');
+
+    await ctx.reply(
+      `📅 <b>Дата платежа:</b> ${dateStr}\n\n` +
+      '💰 <b>Шаг 2 из 3: Укажите сумму платежа (руб.)</b>\n\n' +
+      'Введите сумму оплаты числом (например, 11000):',
+      {
+        parse_mode: 'HTML',
+        ...Markup.inlineKeyboard([
+          ...(defaultBtn.length > 0 ? [defaultBtn] : []),
+          [Markup.button.callback('❌ Отмена', 'cancel_payment_flow')]
+        ])
+      }
+    );
+  }
+
+  private async handlePaymentAmountDefault(ctx: MyContext) {
+    ctx.session = ctx.session || {};
+    const amountStr = ctx.session.paymentSuggestedAmount;
+    const amount = amountStr ? parseFloat(amountStr) : 0;
+
+    if (isNaN(amount) || amount <= 0) {
+      await ctx.answerCbQuery('Некорректная сумма');
+      return;
+    }
+
+    ctx.session.paymentAmount = amount;
+    ctx.session.state = 'awaiting_payment_photo';
+
+    await ctx.answerCbQuery();
+
+    const dateStr = ctx.session.paymentDate
+      ? new Date(ctx.session.paymentDate).toLocaleDateString('ru-RU')
+      : 'Сегодня';
+
+    await ctx.reply(
+      `📅 <b>Дата:</b> ${dateStr}\n` +
+      `💰 <b>Сумма:</b> ${amount.toFixed(2)} руб.\n\n` +
+      '🧾 <b>Шаг 3 из 3: Загрузка чека об оплате</b>\n\n' +
+      'Пожалуйста, отправьте фотографию чека/квитанции об оплате или нажмите «Пропустить чек»:',
+      {
+        parse_mode: 'HTML',
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback('⏩ Пропустить чек', 'skip_payment_photo')],
+          [Markup.button.callback('❌ Отмена', 'cancel_payment_flow')]
+        ])
+      }
+    );
+  }
+
+  private async handleSkipPaymentPhotoAction(ctx: MyContext) {
+    if (ctx.session?.state === 'awaiting_payment_photo') {
+      await ctx.answerCbQuery('Чек пропущен');
+      return this.submitTenantPayment(ctx, null);
+    } else {
+      await ctx.answerCbQuery('Действие недействительно');
+    }
+  }
+
+  private async handleCancelPaymentFlow(ctx: MyContext) {
+    if (ctx.session) {
+      ctx.session.state = undefined;
+      ctx.session.paymentTenantId = undefined;
+      ctx.session.paymentSuggestedAmount = undefined;
+      ctx.session.paymentDate = undefined;
+      ctx.session.paymentAmount = undefined;
+    }
+    await ctx.answerCbQuery('Отменено');
+    try {
+      await ctx.editMessageText('❌ Добавление платежа отменено.', Markup.inlineKeyboard([]));
+    } catch {
+      await ctx.reply('❌ Добавление платежа отменено.');
+    }
+  }
+
+  private async submitTenantPayment(ctx: MyContext, photoFileId: string | null) {
+    let tenantId = ctx.session.paymentTenantId;
+    const amount = ctx.session.paymentAmount;
+    const paymentDate = ctx.session.paymentDate ? new Date(ctx.session.paymentDate) : new Date();
+
+    if (!amount) {
+      ctx.session.state = undefined;
+      return ctx.reply('⚠️ Ошибка сессии. Начните добавление платежа заново.');
+    }
+
+    try {
+      if (!tenantId || tenantId === 0) {
+        if (ctx.from) {
+          const user = await this.prisma.user.findUnique({
+            where: { telegramId: BigInt(ctx.from.id) }
+          });
+          if (user && user.tenantId) {
+            tenantId = user.tenantId;
+          }
+        }
+      }
+
+      if (!tenantId) {
+        ctx.session.state = undefined;
+        return ctx.reply('⚠️ Не удалось определить ваш профиль арендатора. Пожалуйста, обратитесь к администратору.');
+      }
+
+      const userName = ctx.from?.username || [ctx.from?.first_name, ctx.from?.last_name].filter(Boolean).join(' ') || 'Арендатор';
+
+      await firstValueFrom(this.accountantClient.send('create_payment', {
+        tenantId,
+        userName,
+        amount,
+        receiptPhotoId: photoFileId,
+        createdAt: paymentDate.toISOString(),
+        status: 'unconfirmed'
+      }));
+
+      ctx.session.state = undefined;
+      ctx.session.paymentTenantId = undefined;
+      ctx.session.paymentSuggestedAmount = undefined;
+      ctx.session.paymentDate = undefined;
+      ctx.session.paymentAmount = undefined;
+
+      const dateStr = paymentDate.toLocaleDateString('ru-RU');
+      const photoStatusStr = photoFileId ? 'Прикреплен 📸' : 'Без чека';
+
+      const successMessage = `✅ <b>Оплата успешно отправлена!</b>\n\n` +
+        `📅 Дата: ${dateStr}\n` +
+        `💰 Сумма: ${amount.toFixed(2)} руб.\n` +
+        `🧾 Чек: ${photoStatusStr}\n\n` +
+        `Информация о платеже передана администратору на проверку.`;
+
+      if (ctx.callbackQuery) {
+        await ctx.editMessageText(successMessage, { parse_mode: 'HTML' });
+      } else {
+        await ctx.reply(successMessage, { parse_mode: 'HTML' });
+      }
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Failed to submit tenant payment: ${errorMsg}`);
+      await ctx.reply('❌ Ошибка при сохранении данных платежа. Попробуйте еще раз.');
     }
   }
 }

@@ -10,13 +10,16 @@ export class TelegramBotNotificationService implements OnModuleInit {
     this.bot = new Telegraf(config.TELEGRAM_BOT_TOKEN);
   }
 
-  async sendNotification(message: string, chatId?: string) {
+  async sendNotification(message: string, chatId?: string, extra?: any) {
     const targetChatId = chatId || config.TELEGRAM_CHAT_ID;
     if (!targetChatId) {
       console.error('No TELEGRAM_CHAT_ID provided');
       return;
     }
-    await this.bot.telegram.sendMessage(targetChatId, message, { parse_mode: 'HTML' });
+    await this.bot.telegram.sendMessage(targetChatId, message, {
+      parse_mode: 'HTML',
+      ...extra,
+    });
   }
 
   async sendAdminNotification(message: string, targetChatId: string, extra?: any) {

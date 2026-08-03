@@ -65,7 +65,7 @@ model Account {
   rawJson       String?   @map("raw_json")
   firstSeenAt         DateTime  @map("first_seen_at")
   lastSeenAt          DateTime  @map("last_seen_at")
-  meterSubmissionDay  Int       @default(20) @map("meter_submission_day")
+
   apartment           Apartment @relation(fields: [apartmentId], references: [id], onDelete: Cascade)
   accruals            Accrual[]
   invoices            Invoice[]
@@ -171,6 +171,7 @@ model ScheduledEvent {
   title           String
   description     String?
   targetType      String         @default("general") @map("target_type") // general, account, tenant, apartment
+  eventType       String         @default("notification") @map("event_type") // notification, meter_submission
   accountId       Int?           @map("account_id")
   tenantId        Int?           @map("tenant_id")
   apartmentId     Int?           @map("apartment_id")

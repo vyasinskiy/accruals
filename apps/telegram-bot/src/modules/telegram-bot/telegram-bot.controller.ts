@@ -100,18 +100,40 @@ export class TelegramBotController {
 
   @EventPattern('remind_rent_payment')
   async handleRentReminder(@Payload() data: { 
-    chatId: string; 
+    tenantId?: number;
+    chatId?: string; 
     rentAmount: string; 
     apartmentAddress: string;
   }) {
+    let targetChatId = data.chatId;
+    const tenantId = data.tenantId || 0;
+
+    if (!targetChatId && tenantId) {
+      try {
+        const user = await this.prisma.user.findUnique({
+          where: { tenantId }
+        });
+        if (user) {
+          targetChatId = user.telegramId.toString();
+        }
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        this.logger.error(`Failed to lookup user by tenantId ${tenantId}: ${msg}`);
+      }
+    }
+
     const message = `🔔 <b>Напоминание об оплате аренды!</b>\n\n` +
       `Квартира: ${data.apartmentAddress}\n` +
       `Сумма к оплате: ${data.rentAmount}\n\n` +
       `Пожалуйста, не забудьте произвести оплату и отправить чек через бота (кнопка "Добавить оплату").`;
 
-    this.logger.log(`Sending rent reminder notification to tenant chatId ${data.chatId}`);
-    await this.botService.sendNotification(message, data.chatId);
-    this.logger.log(`Rent reminder notification sent to tenant chatId ${data.chatId}`);
+    const extra = Markup.inlineKeyboard([
+      [Markup.button.callback('💳 Добавить оплату', `tenant_pay_${tenantId}_${data.rentAmount}`)]
+    ]);
+
+    this.logger.log(`Sending rent reminder notification to tenant chatId ${targetChatId || 'default'} (tenantId: ${tenantId})`);
+    await this.botService.sendNotification(message, targetChatId, extra);
+    this.logger.log(`Rent reminder notification sent to tenant chatId ${targetChatId || 'default'}`);
   }
 
   /**
@@ -330,6 +352,7 @@ export class TelegramBotController {
   @MessagePattern('meter_submission_required')
   async handleMeterSubmissionRequired(@Payload() data: {
     eventId: number;
+    scheduledEventId?: number;
     accountExternalId: string;
     accountLabel: string;
     apartmentAddress: string;
@@ -346,7 +369,8 @@ export class TelegramBotController {
 
     const extra = getMeterSubmissionButtons({
       id: data.eventId,
-      status: 'PENDING'
+      status: 'PENDING',
+      scheduledEventId: data.scheduledEventId
     });
 
     const success = await this.notifyAdmins(message, 'meter_submission_required', extra);
@@ -356,6 +380,7 @@ export class TelegramBotController {
   @MessagePattern('meter_submission_reminder')
   async handleMeterSubmissionReminder(@Payload() data: {
     eventId: number;
+    scheduledEventId?: number;
     accountExternalId: string;
     accountLabel: string;
     apartmentAddress: string;
@@ -372,7 +397,8 @@ export class TelegramBotController {
 
     const extra = getMeterSubmissionButtons({
       id: data.eventId,
-      status: 'PENDING'
+      status: 'PENDING',
+      scheduledEventId: data.scheduledEventId
     });
 
     const success = await this.notifyAdmins(message, 'meter_submission_reminder', extra);
@@ -479,7 +505,11 @@ export class TelegramBotController {
       `${customTextSection}\n` +
       `⚡ Пожалуйста, проверьте статус события в панели управления!`;
 
-    await this.notifyAdmins(message, `scheduled_event_triggered (#${data.eventId})`);
+    const extra = Markup.inlineKeyboard([
+      [Markup.button.url('⚙️ Настроить событие', `http://localhost:3000/events/${data.eventId}`)]
+    ]);
+
+    await this.notifyAdmins(message, `scheduled_event_triggered (#${data.eventId})`, extra);
   }
 
   private async notifyAdmins(
@@ -551,24 +581,29 @@ export function formatMeterSubmissionMessage(data: {
 export function getMeterSubmissionButtons(event: {
   id: number;
   status?: string;
+  scheduledEventId?: number;
 }) {
-  if (event.status === 'SUBMITTED' || event.status === 'COMPLETED_WITHOUT_SUBMISSION') {
-    return Markup.inlineKeyboard([]); // Нет кнопок для финальных статусов
-  }
+  let buttons: any[] = [];
 
   if (event.status === 'RECEIVED') {
-    return Markup.inlineKeyboard([
+    buttons = [
       [Markup.button.callback('📤 Отметить как переданные', `admin_submit_readings_${event.id}`)],
       [Markup.button.callback('📝 Изменить показания', `admin_enter_readings_${event.id}`)],
       [Markup.button.callback('❌ Завершить без передачи', `admin_complete_without_sub_${event.id}`)]
-    ]);
+    ];
+  } else if (event.status !== 'SUBMITTED' && event.status !== 'COMPLETED_WITHOUT_SUBMISSION') {
+    buttons = [
+      [
+        Markup.button.callback('✅ Получены', `admin_confirm_readings_received_${event.id}`),
+        Markup.button.callback('📥 Ввести показания', `admin_enter_readings_${event.id}`)
+      ],
+      [Markup.button.callback('❌ Завершить без передачи', `admin_complete_without_sub_${event.id}`)]
+    ];
   }
 
-  return Markup.inlineKeyboard([
-    [
-      Markup.button.callback('✅ Получены', `admin_confirm_readings_received_${event.id}`),
-      Markup.button.callback('📥 Ввести показания', `admin_enter_readings_${event.id}`)
-    ],
-    [Markup.button.callback('❌ Завершить без передачи', `admin_complete_without_sub_${event.id}`)]
-  ]);
+  if (event.scheduledEventId) {
+    buttons.push([Markup.button.url('⚙️ Настроить расписание', `http://localhost:3000/events/${event.scheduledEventId}`)]);
+  }
+
+  return Markup.inlineKeyboard(buttons);
 }

@@ -11,6 +11,21 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Missing fileId' }, { status: 400 });
     }
 
+    if (fileId.startsWith('data:')) {
+      const matches = fileId.match(/^data:(.+?);base64,(.+)$/);
+      if (matches) {
+        const contentType = matches[1];
+        const buffer = Buffer.from(matches[2], 'base64');
+        return new Response(buffer, {
+          headers: {
+            'Content-Type': contentType,
+            'Cache-Control': 'public, max-age=31536000, immutable',
+          },
+        });
+      }
+      return NextResponse.json({ error: 'Invalid Data URI format' }, { status: 400 });
+    }
+
     if (!token) {
       return NextResponse.json({ error: 'Telegram Bot Token not configured' }, { status: 500 });
     }

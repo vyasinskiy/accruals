@@ -26,6 +26,25 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { action, paymentId, comment } = body;
 
+    if (action === 'create') {
+      const { tenantId, amount, createdAt, comment: newComment, receiptPhotoId, status: paymentStatus } = body;
+      if (!tenantId) {
+        return NextResponse.json({ error: 'Missing tenantId' }, { status: 400 });
+      }
+      if (!amount) {
+        return NextResponse.json({ error: 'Missing amount' }, { status: 400 });
+      }
+      const { data } = await accountantClient.post('/payments', {
+        tenantId: Number(tenantId),
+        amount: Number(amount),
+        createdAt,
+        comment: newComment,
+        receiptPhotoId,
+        status: paymentStatus || 'unconfirmed',
+      });
+      return NextResponse.json(data);
+    }
+
     if (!paymentId) {
       return NextResponse.json({ error: 'Missing paymentId' }, { status: 400 });
     }

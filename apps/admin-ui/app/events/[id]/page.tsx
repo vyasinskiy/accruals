@@ -58,6 +58,7 @@ interface ScheduledEventDetail {
   title: string;
   description: string | null;
   targetType: 'general' | 'account' | 'tenant' | 'apartment';
+  eventType?: string | null;
   accountId?: number | null;
   tenantId?: number | null;
   apartmentId?: number | null;
@@ -188,6 +189,25 @@ export default function EventDetailPage({ params }: { params: { id: string } }) 
     }
   };
 
+  const handleToggleActive = async () => {
+    try {
+      await axios.put(`/api/events/${eventId}`, { active: !event.active });
+      mutate();
+    } catch {
+      alert('Ошибка при изменении статуса события.');
+    }
+  };
+
+  const handleDeleteEvent = async () => {
+    if (!confirm('Вы уверены, что хотите удалить это событие?')) return;
+    try {
+      await axios.delete(`/api/events/${eventId}`);
+      router.push('/events');
+    } catch {
+      alert('Ошибка при удалении события.');
+    }
+  };
+
   const renderTargetInfo = () => {
     switch (event.targetType) {
       case 'account':
@@ -224,19 +244,44 @@ export default function EventDetailPage({ params }: { params: { id: string } }) 
           </div>
         </div>
 
-        <Button
-          onClick={() => setIsEditModalOpen(true)}
-          variant="contained"
-          startIcon={<EditIcon />}
-          style={{ textTransform: 'none', backgroundColor: '#3b82f6', fontWeight: 600 }}
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <Button
+            onClick={handleToggleActive}
+            variant="outlined"
+            style={{ textTransform: 'none', color: event.active ? '#f59e0b' : '#10b981', borderColor: event.active ? '#f59e0b' : '#10b981', fontWeight: 600 }}
+          >
+            {event.active ? 'Отключить' : 'Включить'}
+          </Button>
+          <Button
+            onClick={handleDeleteEvent}
+            variant="outlined"
+            startIcon={<DeleteIcon />}
+            style={{ textTransform: 'none', color: '#ef4444', borderColor: '#ef4444', fontWeight: 600 }}
+          >
+            Удалить
+          </Button>
+          <Button
+            onClick={() => setIsEditModalOpen(true)}
+            variant="contained"
+            startIcon={<EditIcon />}
+            style={{ textTransform: 'none', backgroundColor: '#3b82f6', fontWeight: 600 }}
+
         >
           Редактировать событие
-        </Button>
+          </Button>
+        </div>
       </div>
 
       {/* Metadata Card */}
       <Paper className={styles.tableCard} style={{ padding: '24px', marginBottom: '24px' }}>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '24px' }}>
+          <div>
+            <span style={{ fontSize: '0.8rem', color: '#64748b', fontWeight: 600, textTransform: 'uppercase' }}>Тип события</span>
+            <div style={{ fontSize: '1.05rem', fontWeight: 700, color: '#0f172a', marginTop: '4px' }}>
+              {event.eventType === 'meter_submission' ? 'Подача показаний счетчиков' : 'Уведомление'}
+            </div>
+          </div>
+
           <div>
             <span style={{ fontSize: '0.8rem', color: '#64748b', fontWeight: 600, textTransform: 'uppercase' }}>Периодичность</span>
             <div style={{ fontSize: '1.05rem', fontWeight: 700, color: '#0f172a', marginTop: '4px' }}>

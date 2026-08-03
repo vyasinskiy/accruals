@@ -1,12 +1,12 @@
 import { Controller, Logger } from '@nestjs/common';
 import { MessagePattern, Payload } from '@nestjs/microservices';
-import { MeterEventService } from './meter-event.service';
+import { MeterSubmissionService } from './meter-submission.service';
 
 @Controller()
-export class MeterEventController {
-  private readonly logger = new Logger(MeterEventController.name);
+export class MeterSubmissionController {
+  private readonly logger = new Logger(MeterSubmissionController.name);
 
-  constructor(private readonly meterEventService: MeterEventService) {}
+  constructor(private readonly meterEventService: MeterSubmissionService) {}
 
   @MessagePattern('submit_meter_readings')
   async handleSubmitMeterReadings(@Payload() data: { eventId: number }) {

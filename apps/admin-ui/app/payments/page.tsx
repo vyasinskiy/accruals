@@ -26,6 +26,13 @@ import DialogContentText from '@mui/material/DialogContentText';
 import DialogActions from '@mui/material/DialogActions';
 import Button from '@mui/material/Button';
 
+import AddIcon from '@mui/icons-material/Add';
+import TextField from '@mui/material/TextField';
+import MenuItem from '@mui/material/MenuItem';
+import Select from '@mui/material/Select';
+import InputLabel from '@mui/material/InputLabel';
+import FormControl from '@mui/material/FormControl';
+
 interface Payment {
   id: number;
   userId: number;
@@ -41,6 +48,19 @@ interface Payment {
   };
 }
 
+interface Tenant {
+  id: number;
+  userId: number;
+  user?: {
+    id: number;
+    name: string;
+  };
+  apartment?: {
+    id: number;
+    address: string | null;
+  } | null;
+}
+
 const fetcher = (url: string) => axios.get(url).then(res => res.data);
 
 export default function PaymentsPage() {
@@ -54,6 +74,74 @@ export default function PaymentsPage() {
   const [selectedReceipt, setSelectedReceipt] = useState<string | null>(null);
   const [rejectPaymentId, setRejectPaymentId] = useState<number | null>(null);
   const [rejectComment, setRejectComment] = useState('');
+
+  // Add Payment Modal states
+  const { data: tenants } = useSWR<Tenant[]>('/api/tenants', fetcher);
+  const [addOpen, setAddOpen] = useState(false);
+  const [addTenantId, setAddTenantId] = useState('');
+  const [addAmount, setAddAmount] = useState('');
+  const [addDate, setAddDate] = useState('');
+  const [addComment, setAddComment] = useState('');
+  const [addStatus, setAddStatus] = useState('confirmed');
+  const [addReceiptPreview, setAddReceiptPreview] = useState<string | null>(null);
+  const [isSubmittingAdd, setIsSubmittingAdd] = useState(false);
+
+  const resetAddForm = () => {
+    setAddTenantId('');
+    setAddAmount('');
+    setAddDate(new Date().toISOString().slice(0, 16));
+    setAddComment('');
+    setAddStatus('confirmed');
+    setAddReceiptPreview(null);
+  };
+
+  const handleOpenAdd = () => {
+    resetAddForm();
+    setAddOpen(true);
+  };
+
+  const handleReceiptFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setAddReceiptPreview(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleAddSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!addTenantId) {
+      alert('Пожалуйста, выберите арендатора.');
+      return;
+    }
+    if (!addAmount || parseFloat(addAmount) <= 0) {
+      alert('Пожалуйста, введите корректную сумму.');
+      return;
+    }
+
+    try {
+      setIsSubmittingAdd(true);
+      await axios.post('/api/payments', {
+        action: 'create',
+        tenantId: parseInt(addTenantId, 10),
+        amount: parseFloat(addAmount),
+        createdAt: addDate ? new Date(addDate).toISOString() : new Date().toISOString(),
+        comment: addComment || null,
+        receiptPhotoId: addReceiptPreview || null,
+        status: addStatus,
+      });
+      setAddOpen(false);
+      resetAddForm();
+      mutate();
+    } catch (err: unknown) {
+      alert('Ошибка при добавлении платежа.');
+    } finally {
+      setIsSubmittingAdd(false);
+    }
+  };
 
   const apiUrl = userIdParam
     ? `/api/payments?userId=${userIdParam}`
@@ -163,28 +251,40 @@ export default function PaymentsPage() {
   return (
     <div className={styles.container}>
       {/* Search and Filters */}
-      <div className={styles.filterCard}>
-        <div className={styles.searchWrapper}>
-          <input
-            type="text"
-            className={styles.searchInput}
-            placeholder="Поиск по имени пользователя или статусу..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
+      <div className={styles.filterCard} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flex: '1', minWidth: '300px' }}>
+          <div className={styles.searchWrapper} style={{ width: '100%', margin: 0 }}>
+            <input
+              type="text"
+              className={styles.searchInput}
+              placeholder="Поиск по имени пользователя или статусу..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+
+          {userIdParam && (
+            <div className={styles.activeFilterBadge}>
+              <span>Показаны платежи пользователя #{userIdParam}</span>
+              <button className={styles.clearFilterBtn} onClick={() => router.push('/payments')} title="Сбросить фильтр">
+                <CloseIcon style={{ fontSize: '1rem' }} />
+              </button>
+            </div>
+          )}
         </div>
 
-        {userIdParam && (
-          <div className={styles.activeFilterBadge}>
-            <span>Показаны платежи пользователя #{userIdParam}</span>
-            <button className={styles.clearFilterBtn} onClick={() => router.push('/payments')} title="Сбросить фильтр">
-              <CloseIcon style={{ fontSize: '1rem' }} />
-            </button>
-          </div>
-        )}
-
-        <div>
-          Найдено платежей: {filteredPayments.length}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+          <span style={{ fontSize: '0.875rem', color: '#64748b' }}>
+            Найдено платежей: {filteredPayments.length}
+          </span>
+          <button
+            className={styles.downloadLink}
+            style={{ padding: '10px 18px', display: 'flex', alignItems: 'center', gap: '6px', border: 'none', cursor: 'pointer' }}
+            onClick={handleOpenAdd}
+          >
+            <AddIcon style={{ fontSize: '1.2rem' }} />
+            Добавить платеж
+          </button>
         </div>
       </div>
 
@@ -217,7 +317,7 @@ export default function PaymentsPage() {
                   <TableCell>
                     {row.receiptPhotoId ? (
                       <img
-                        src={`/api/payments/receipt?fileId=${row.receiptPhotoId}`}
+                        src={`/api/payments/receipt?fileId=${encodeURIComponent(row.receiptPhotoId)}`}
                         alt="Чек"
                         className={styles.receiptThumbnail}
                         onClick={() => setSelectedReceipt(row.receiptPhotoId)}
@@ -284,7 +384,7 @@ export default function PaymentsPage() {
             </div>
             <div className={styles.modalBody}>
               <img
-                src={`/api/payments/receipt?fileId=${selectedReceipt}`}
+                src={`/api/payments/receipt?fileId=${encodeURIComponent(selectedReceipt)}`}
                 alt="Чек крупно"
                 className={styles.largeReceiptImage}
               />
@@ -334,6 +434,128 @@ export default function PaymentsPage() {
           </div>
         </div>
       )}
+
+      {/* MUI Add Payment Dialog Modal */}
+      <Dialog
+        open={addOpen}
+        onClose={() => setAddOpen(false)}
+        aria-labelledby="add-payment-title"
+        maxWidth="sm"
+        fullWidth
+      >
+        <form onSubmit={handleAddSubmit}>
+          <DialogTitle id="add-payment-title" style={{ fontWeight: 700 }}>
+            Добавление нового платежа
+          </DialogTitle>
+          <DialogContent style={{ display: 'flex', flexDirection: 'column', gap: '16px', paddingTop: '8px' }}>
+            <FormControl fullWidth variant="outlined" required>
+              <InputLabel id="select-tenant-label">Арендатор</InputLabel>
+              <Select
+                labelId="select-tenant-label"
+                id="select-tenant"
+                value={addTenantId}
+                onChange={(e) => setAddTenantId(e.target.value as string)}
+                label="Арендатор"
+              >
+                {tenants?.map((t) => (
+                  <MenuItem key={t.id} value={String(t.id)}>
+                    {t.user?.name || `Арендатор #${t.id}`}
+                    {t.apartment?.address ? ` (${t.apartment.address})` : ''}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+
+            <TextField
+              label="Сумма платежа (руб.)"
+              type="number"
+              fullWidth
+              required
+              variant="outlined"
+              value={addAmount}
+              onChange={(e) => setAddAmount(e.target.value)}
+              inputProps={{ min: "0.01", step: "0.01" }}
+            />
+
+            <TextField
+              label="Дата и время платежа"
+              type="datetime-local"
+              fullWidth
+              required
+              variant="outlined"
+              value={addDate}
+              onChange={(e) => setAddDate(e.target.value)}
+              InputLabelProps={{ shrink: true }}
+            />
+
+            <FormControl fullWidth variant="outlined">
+              <InputLabel id="select-status-label">Статус платежа</InputLabel>
+              <Select
+                labelId="select-status-label"
+                id="select-status"
+                value={addStatus}
+                onChange={(e) => setAddStatus(e.target.value as string)}
+                label="Статус платежа"
+              >
+                <MenuItem value="confirmed">Подтвержден</MenuItem>
+                <MenuItem value="unconfirmed">Ожидает проверки</MenuItem>
+              </Select>
+            </FormControl>
+
+            <div>
+              <label style={{ display: 'block', marginBottom: '6px', fontSize: '0.875rem', fontWeight: 500, color: '#334155' }}>
+                Чек об оплате (изображение)
+              </label>
+              <input
+                type="file"
+                accept="image/*"
+                onChange={handleReceiptFileChange}
+                style={{ fontSize: '0.875rem' }}
+              />
+              {addReceiptPreview && (
+                <div style={{ marginTop: '10px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <img
+                    src={addReceiptPreview}
+                    alt="Предпросмотр чека"
+                    style={{ width: '80px', height: '80px', objectFit: 'cover', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setAddReceiptPreview(null)}
+                    style={{ border: 'none', background: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '0.875rem' }}
+                  >
+                    Удалить чек
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <TextField
+              label="Комментарий"
+              multiline
+              rows={3}
+              fullWidth
+              variant="outlined"
+              placeholder="Дополнительная информация по платежу..."
+              value={addComment}
+              onChange={(e) => setAddComment(e.target.value)}
+            />
+          </DialogContent>
+          <DialogActions style={{ padding: '16px 24px' }}>
+            <Button onClick={() => setAddOpen(false)} variant="outlined" style={{ color: '#475569', borderColor: '#cbd5e1', textTransform: 'none' }}>
+              Отмена
+            </Button>
+            <Button
+              type="submit"
+              variant="contained"
+              disabled={isSubmittingAdd}
+              style={{ textTransform: 'none', backgroundColor: '#4f46e5' }}
+            >
+              {isSubmittingAdd ? 'Сохранение...' : 'Создать платеж'}
+            </Button>
+          </DialogActions>
+        </form>
+      </Dialog>
 
       {/* MUI Delete Confirmation Dialog */}
       <Dialog

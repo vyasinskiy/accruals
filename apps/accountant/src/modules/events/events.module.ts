@@ -1,11 +1,10 @@
 import { Module } from '@nestjs/common';
 import { ClientsModule, Transport } from '@nestjs/microservices';
-import { AccountantController } from './accountant.controller';
-import { AccountantService } from './accountant.service';
+import { EventsController } from './events.controller';
+import { EventsService } from './events.service';
 import { PrismaModule } from '../../common/prisma/prisma.module';
 import { S3Module } from '../s3/s3.module';
 import { MeterSubmissionModule } from '../meter-submission/meter-submission.module';
-import { EventsModule } from '../events/events.module';
 import { config } from '../../common/config/config';
 
 @Module({
@@ -13,7 +12,6 @@ import { config } from '../../common/config/config';
     PrismaModule,
     S3Module,
     MeterSubmissionModule,
-    EventsModule,
     ClientsModule.register([
       {
         name: 'NOTIFICATIONS_SERVICE',
@@ -28,9 +26,8 @@ import { config } from '../../common/config/config';
       },
     ]),
   ],
-  controllers: [AccountantController],
-  providers: [
-    AccountantService
-  ],
+  controllers: [EventsController],
+  providers: [EventsService],
+  exports: [EventsService],
 })
-export class AccountantModule {}
+export class EventsModule {}

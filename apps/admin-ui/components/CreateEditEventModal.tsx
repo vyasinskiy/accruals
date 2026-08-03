@@ -39,6 +39,7 @@ export interface EventToEditItem {
   title: string;
   description: string | null;
   targetType: 'general' | 'account' | 'tenant' | 'apartment';
+  eventType?: string | null;
   accountId?: number | null;
   tenantId?: number | null;
   apartmentId?: number | null;
@@ -74,6 +75,7 @@ export default React.memo(function CreateEditEventModal({
 }: CreateEditEventModalProps) {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
+  const [eventType, setEventType] = useState<'notification' | 'meter_submission' | 'rent_payment'>('notification');
   const [targetType, setTargetType] = useState<'general' | 'account' | 'tenant' | 'apartment'>('general');
   const [accountId, setAccountId] = useState('');
   const [tenantId, setTenantId] = useState('');
@@ -94,6 +96,7 @@ export default React.memo(function CreateEditEventModal({
       if (eventToEdit) {
         setTitle(eventToEdit.title || '');
         setDescription(eventToEdit.description || '');
+        setEventType((eventToEdit.eventType as any) || 'notification');
         setTargetType(eventToEdit.targetType || 'general');
         setAccountId(eventToEdit.accountId ? String(eventToEdit.accountId) : (accounts && accounts.length > 0 ? String(accounts[0].id) : ''));
         setTenantId(eventToEdit.tenantId ? String(eventToEdit.tenantId) : (tenants && tenants.length > 0 ? String(tenants[0].id) : ''));
@@ -110,6 +113,7 @@ export default React.memo(function CreateEditEventModal({
       } else {
         setTitle('');
         setDescription('');
+        setEventType('notification');
         setTargetType('general');
         setAccountId(accounts && accounts.length > 0 ? String(accounts[0].id) : '');
         setTenantId(tenants && tenants.length > 0 ? String(tenants[0].id) : '');
@@ -139,6 +143,7 @@ export default React.memo(function CreateEditEventModal({
         title: title.trim(),
         description: description.trim(),
         targetType,
+        eventType,
         accountId: targetType === 'account' ? Number(accountId) : null,
         tenantId: targetType === 'tenant' ? Number(tenantId) : null,
         apartmentId: targetType === 'apartment' ? Number(apartmentId) : null,
@@ -200,6 +205,22 @@ export default React.memo(function CreateEditEventModal({
               className={styles.searchInput}
               style={{ width: '100%', height: '60px', padding: '10px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', resize: 'vertical' }}
             />
+          </div>
+
+          <div>
+            <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 600, marginBottom: '6px', color: '#334155' }}>
+              Тип события:
+            </label>
+            <select
+              value={eventType}
+              onChange={(e) => setEventType(e.target.value as any)}
+              className={styles.searchInput}
+              style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+            >
+              <option value="notification">Уведомление</option>
+              <option value="meter_submission">Подача показаний счетчиков</option>
+              <option value="rent_payment">Оплата арендатора</option>
+            </select>
           </div>
 
           <div>

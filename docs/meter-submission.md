@@ -6,20 +6,17 @@
 
 ```mermaid
 graph TD
-    A[Cron: Ежечасная проверка] --> B{Есть событие для текущего периода?}
-    B -- Нет --> C[Создать MeterSubmissionEvent на день сдачи 09:00]
-    B -- Да --> D{Наступил день сдачи и notification_sent = false?}
-    C --> D
-    D -- Да --> E[Запрос meter_submission_required через send]
-    E --> F[Telegram-бот шлет уведомление админу]
-    F --> G{Доставлено успешно?}
-    G -- Да --> H[Отметить в БД: notification_sent = true]
-    D -- Нет --> I{Сегодня понедельник?}
-    I -- Да --> J{Событие не финальное: status в PENDING, RECEIVED?}
-    J -- Да --> K[Запрос meter_submission_reminder через send]
-    K --> L[Telegram-бот шлет напоминание]
-    L --> M{Доставлено успешно?}
-    M -- Да --> N[Обновить в БД: last_reminder_sent = now]
+    A[Cron: Ежеминутная проверка ScheduledEvent] --> B{Подошло время триггера?}
+    B -- Да --> C{Тип события = meter_submission?}
+    C -- Да --> D[Создать/найти MeterSubmissionEvent]
+    D --> E{Это напоминание?}
+    E -- Нет --> F[Запрос meter_submission_required]
+    E -- Да --> G{Статус PENDING или RECEIVED?}
+    G -- Да --> H[Запрос meter_submission_reminder]
+    F --> I[Telegram-бот шлет уведомление админу]
+    H --> I
+    I --> J{Доставлено успешно?}
+    J -- Да --> K[Обновить notification_sent / lastReminderSent в БД]
 ```
 
 ## Статусы события
@@ -36,9 +33,10 @@ graph TD
 ## Детальная последовательность шагов
 
 ### 1. Инициализация и планирование (Accountant Service)
-* Ежечасно срабатывает Cron-метод `handleMeterChecks` в `MeterEventService`.
-* Метод вычисляет текущий период (например, `202607` для июля 2026 года) и проверяет наличие записи `MeterSubmissionEvent` для каждого `Account` в БД.
-* Если записи нет, создается событие. Дата отправки (`targetDate`) рассчитывается индивидуально для каждого счета на основе поля `meterSubmissionDay` в таблице `Account` (по умолчанию `20`). Для предотвращения переноса даты на следующий месяц (например, 31 июня), день автоматически ограничивается (clamped) максимальным числом дней в текущем месяце. Время отправки устанавливается на **09:00:00**.
+* Пользователь настраивает событие типа `meter_submission` (Подача показаний) в Dashboard UI.
+* Ежеминутно срабатывает метод `handleScheduledEventsCheck` в `AccountantService`.
+* При наступлении заданного времени срабатывает триггер события. Если тип события `meter_submission`, управление передается в `MeterEventService.processMeterSubmissionTrigger`.
+* Сервис находит целевые счета, указанные в `ScheduledEvent`, и для каждого проверяет наличие записи `MeterSubmissionEvent` в текущем месяце. Если ее нет, она создается.
 
 ### 2. Отправка первого уведомления
 * Если текущее время больше или равно `targetDate` и `notificationSent` в БД равен `false`:
@@ -51,14 +49,12 @@ graph TD
     * `📥 Ввести показания` (callback: `admin_enter_readings_${eventId}`)
     * `❌ Завершить без передачи` (callback: `admin_complete_without_sub_${eventId}`)
 
-### 3. Еженедельные напоминания по понедельникам
-* Если сегодня понедельник, Accountant проверяет наличие событий, у которых:
-  * `notificationSent = true`
-  * `status` равен `PENDING` или `RECEIVED` (событие еще не перешло в финальный статус).
-  * Событие относится к прошлой календарной неделе (`targetDate < начало текущей недели`).
-  * Напоминание еще не отправлялось на этой неделе (`lastReminderSent` пуст или меньше начала текущей недели).
-* При совпадении условий Accountant отправляет запрос `meter_submission_reminder` в RabbitMQ (также через Request-Response `send`).
-* Бот доставляет повторное напоминание в Telegram и возвращает `{ success: true }`. При успешном ответе в Accountant обновляется поле `lastReminderSent = now`.
+### 3. Напоминания (управляются движком ScheduledEvent)
+* Движок ScheduledEvent самостоятельно рассчитывает время для повторного напоминания (исходя из `reminderFrequency`, настроенного в дашборде).
+* При срабатывании напоминания вызывается `processMeterSubmissionTrigger(event, trigger, true)`.
+* Accountant проверяет, находится ли `MeterSubmissionEvent` все еще в статусе `PENDING` или `RECEIVED`.
+* При совпадении условий Accountant отправляет запрос `meter_submission_reminder` в RabbitMQ.
+* Бот доставляет повторное напоминание в Telegram с кнопкой ссылки на дашборд.
 
 ### 4. Интерактивные действия администратора
 
